@@ -1,4 +1,5 @@
 #include "project_config.h"
+#include "def_consts.h"
 
 #if CONFIG_OPENMON_ENABLE && CONFIG_OPENMON_PINGER_ENABLE
 

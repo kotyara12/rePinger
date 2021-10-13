@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "project_config.h"
+#include "def_consts.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/opt.h"

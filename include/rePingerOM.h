@@ -10,6 +10,8 @@
 #define __RE_PINGEROM_H__
 
 #include "reEvents.h"
+#include "project_config.h"
+#include "def_consts.h"
 
 #ifdef __cplusplus
 extern "C" {
