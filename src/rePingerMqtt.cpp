@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "project_config.h"
+#include "def_consts.h"
 #include "rLog.h"
 #include "rePingerMqtt.h"
 #include "rStrings.h"
