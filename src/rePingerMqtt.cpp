@@ -12,7 +12,7 @@ static char* _mqttTopicPing = nullptr;
 char* mqttTopicPingerCreate(const bool primary)
 {
   if (_mqttTopicPing) free(_mqttTopicPing);
-  _mqttTopicPing = mqttGetTopic1(primary, CONFIG_MQTT_PINGER_LOCAL, CONFIG_MQTT_PINGER_TOPIC);
+  _mqttTopicPing = mqttGetTopicDevice1(primary, CONFIG_MQTT_PINGER_LOCAL, CONFIG_MQTT_PINGER_TOPIC);
   rlog_i(tagPMQTT, "Generated topic for publishing ping result: [ %s ]", _mqttTopicPing);
   return _mqttTopicPing;
 }

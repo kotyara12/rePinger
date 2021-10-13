@@ -66,11 +66,14 @@ typedef struct {
     uint8_t tos;
     uint8_t ttl;
     uint32_t total_duration_ms;
+    uint32_t max_duration_ms;
     float total_loss;
+    float max_loss;
     ping_state_t total_state;
     uint32_t limit_unavailable;
     uint32_t count_unavailable;
     time_t time_unavailable;
+    bool notify_unavailable; 
 } pinger_data_t;
 
 TaskHandle_t _pingTask;
@@ -176,7 +179,9 @@ static void pingerFreeSession(pinger_data_t *ep)
   }
 }
 
-static esp_err_t pingerInitSession(pinger_data_t *ep, const char* hostname, uint32_t hostid, uint32_t datasize, uint32_t timeout, uint32_t count, uint32_t limit_unavailable)
+static esp_err_t pingerInitSession(pinger_data_t *ep, 
+  const char* hostname, uint32_t hostid, uint32_t datasize, uint32_t timeout, uint32_t count, 
+  uint32_t max_duration, float max_loss, uint32_t limit_unavailable)
 {
   esp_err_t ret = ESP_OK;
   PING_CHECK(ep, "Ping data can't be null", err, ESP_ERR_INVALID_ARG);
@@ -188,8 +193,11 @@ static esp_err_t pingerInitSession(pinger_data_t *ep, const char* hostname, uint
   ep->datasize = datasize;
   ep->count = count;
   ep->total_state = PING_AVAILABLE;
+  ep->max_duration_ms = max_duration; 
+  ep->max_loss = max_loss;
   ep->limit_unavailable = limit_unavailable;
   ep->count_unavailable = 0;
+  ep->notify_unavailable = false;
 
   // Allocating memory for a data packet
   ep->icmp_pkt_size = sizeof(struct icmp_echo_hdr) + datasize;
@@ -369,7 +377,7 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
       if (ep->received == 0) {
         ep->total_state = PING_UNAVAILABLE;
       } else {
-        if ((ep->total_duration_ms < CONFIG_PINGER_TIME_MAX) && (ep->total_loss < CONFIG_PINGER_LOSS_MAX)) {
+        if ((ep->total_duration_ms < ep->max_duration_ms) && (ep->total_loss < ep->max_loss)) {
           ep->total_state = PING_AVAILABLE;
         } else {
           ep->total_state = PING_BAD;
@@ -387,18 +395,24 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
     
     // Post event
     if (ep->total_state == PING_AVAILABLE) {
-      if (ep->count_unavailable > 0) {
+      if (ep->notify_unavailable || (ep->count_unavailable > 0)) {
         rlog_i(logTAG, "Host [ %s ] is available", ep->host_name);
         host_data.time_unavailable = ep->time_unavailable;
         ep->count_unavailable = 0;
         ep->time_unavailable = 0;
-        eventLoopPost(RE_PING_EVENTS, evid_availavble, &host_data, sizeof(host_data), portMAX_DELAY);
+        if (ep->notify_unavailable) {
+          ep->notify_unavailable = false;
+          eventLoopPost(RE_PING_EVENTS, evid_availavble, &host_data, sizeof(host_data), portMAX_DELAY);
+        };
       };
     } else {
-      if (ep->count_unavailable == 0) ep->time_unavailable = time(nullptr);
+      if (ep->count_unavailable == 0) {
+        ep->time_unavailable = time(nullptr);
+      };
       ep->count_unavailable++;
       rlog_w(logTAG, "Host [ %s ] is not available (count=%d)", ep->host_name, ep->count_unavailable);
-      if (ep->count_unavailable == ep->limit_unavailable) {
+      if ((!ep->notify_unavailable) && (ep->count_unavailable >= ep->limit_unavailable)) {
+        ep->notify_unavailable = true;
         host_data.time_unavailable = ep->time_unavailable;
         eventLoopPost(RE_PING_EVENTS, evid_unavailavble, &host_data, sizeof(host_data), portMAX_DELAY);
       };
@@ -429,36 +443,39 @@ static void pingerExec(void *args)
 
   static pinger_data_t pdHost1;
   pingerInitSession(&pdHost1, CONFIG_PINGER_HOST_1, 7001, 
-    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, 1);
+    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, CONFIG_PINGER_MAX_DURATION_1, CONFIG_PINGER_MAX_LOSS_1, 1);
   data.inet.hosts_count++;
   #ifdef CONFIG_PINGER_HOST_2
   static pinger_data_t pdHost2;
   pingerInitSession(&pdHost2, CONFIG_PINGER_HOST_2, 7002, 
-    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, 1);
+    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, CONFIG_PINGER_MAX_DURATION_2, CONFIG_PINGER_MAX_LOSS_2, 1);
   data.inet.hosts_count++;
   #endif // CONFIG_PINGER_HOST_2
   #ifdef CONFIG_PINGER_HOST_3
   static pinger_data_t pdHost3;
   pingerInitSession(&pdHost3, CONFIG_PINGER_HOST_3, 7003, 
-    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, 1);
+    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, CONFIG_PINGER_MAX_DURATION_3, CONFIG_PINGER_MAX_LOSS_3, 1);
   data.inet.hosts_count++;
   #endif // CONFIG_PINGER_HOST_3
   
   #if CONFIG_TELEGRAM_ENABLE & defined(CONFIG_TELEGRAM_HOST_CHECK)
   static pinger_data_t pdTelegram;
   pingerInitSession(&pdTelegram, CONFIG_TELEGRAM_HOST_CHECK, 8010, 
-    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, CONFIG_TELEGRAM_HOST_CHECK_LIMIT);
+    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, 
+    CONFIG_TELEGRAM_HOST_CHECK_DURATION, CONFIG_TELEGRAM_HOST_CHECK_LOSS, CONFIG_TELEGRAM_HOST_CHECK_LIMIT);
   #endif // CONFIG_TELEGRAM_ENABLE && defined(CONFIG_TELEGRAM_HOST_CHECK)
 
   #if CONFIG_MQTT1_PING_CHECK
   static pinger_data_t pdMqtt1;
   pingerInitSession(&pdMqtt1, CONFIG_MQTT1_HOST, 8101, 
-    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, CONFIG_MQTT1_PING_CHECK_LIMIT);
+    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, 
+    CONFIG_MQTT1_PING_CHECK_DURATION, CONFIG_MQTT1_PING_CHECK_LOSS, CONFIG_MQTT1_PING_CHECK_LIMIT);
   #endif // CONFIG_MQTT1_PING_CHECK
   #if CONFIG_MQTT2_PING_CHECK
   pinger_data_t pdMqtt2;
   pingerInitSession(&pdMqtt2, CONFIG_MQTT2_HOST, 8102, 
-    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, CONFIG_MQTT2_PING_CHECK_LIMIT);
+    CONFIG_PINGER_DATASIZE, CONFIG_PINGER_TIMEOUT, CONFIG_PINGER_COUNT, 
+    CONFIG_MQTT2_PING_CHECK_DURATION, CONFIG_MQTT2_PING_CHECK_LOSS, CONFIG_MQTT2_PING_CHECK_LIMIT);
   #endif // CONFIG_MQTT2_PING_CHECK
 
   #if CONFIG_OPENMON_ENABLE && CONFIG_OPENMON_PINGER_ENABLE
@@ -516,9 +533,9 @@ static void pingerExec(void *args)
         data.inet.hosts_available++;
         data.inet.duration_ms_avg = (pdHost1.total_duration_ms + pdHost2.total_duration_ms) / 2;
         data.inet.loss_avg = (pdHost1.total_loss + pdHost2.total_loss) / 2;
-        PING_SET_MIN(pdHost2.total_duration_ms, data.inet.duration_ms_min, pdHost2.total_loss, CONFIG_PINGER_LOSS_MAX);
+        PING_SET_MIN(pdHost2.total_duration_ms, data.inet.duration_ms_min, pdHost2.total_loss, CONFIG_PINGER_MAX_LOSS_INET);
         PING_SET_MAX(pdHost2.total_duration_ms, data.inet.duration_ms_max);
-        PING_SET_MIN(pdHost2.total_loss, data.inet.loss_min, pdHost2.total_duration_ms, CONFIG_PINGER_TIME_MAX);
+        PING_SET_MIN(pdHost2.total_loss, data.inet.loss_min, pdHost2.total_duration_ms, CONFIG_PINGER_MAX_DURATION_INET);
         PING_SET_MAX(pdHost2.total_loss, data.inet.loss_max);
       };
       pingerCopyHostData(&pdHost2, &data.host2);
@@ -528,9 +545,9 @@ static void pingerExec(void *args)
         data.inet.hosts_available++;
         data.inet.duration_ms_avg = (pdHost1.total_duration_ms + pdHost2.total_duration_ms + pdHost3.total_duration_ms) / 3;
         data.inet.loss_avg = (pdHost1.total_loss + pdHost2.total_loss + pdHost3.total_loss) / 3;
-        PING_SET_MIN(pdHost3.total_duration_ms, data.inet.duration_ms_min, pdHost3.total_loss, CONFIG_PINGER_LOSS_MAX);
+        PING_SET_MIN(pdHost3.total_duration_ms, data.inet.duration_ms_min, pdHost3.total_loss, CONFIG_PINGER_MAX_LOSS_INET);
         PING_SET_MAX(pdHost3.total_duration_ms, data.inet.duration_ms_max);
-        PING_SET_MIN(pdHost3.total_loss, data.inet.loss_min, pdHost3.total_duration_ms, CONFIG_PINGER_TIME_MAX);
+        PING_SET_MIN(pdHost3.total_loss, data.inet.loss_min, pdHost3.total_duration_ms, CONFIG_PINGER_MAX_DURATION_INET);
         PING_SET_MAX(pdHost3.total_loss, data.inet.loss_max);
       };
       pingerCopyHostData(&pdHost3, &data.host3);
@@ -543,11 +560,11 @@ static void pingerExec(void *args)
         data.inet.count_unavailable = 0;
         // The final result of the check is determined by the best result
         #if CONFIG_PINGER_TOTAL_RESULT_MODE == 0
-          if ((data.inet.duration_ms_min < CONFIG_PINGER_TIME_MAX) && (data.inet.loss_min < CONFIG_PINGER_LOSS_MAX))
+          if ((data.inet.duration_ms_min < CONFIG_PINGER_MAX_DURATION_INET) && (data.inet.loss_min < CONFIG_PINGER_MAX_LOSS_INET))
         #elif CONFIG_PINGER_TOTAL_RESULT_MODE == 1
-          if ((data.inet.duration_ms_avg < CONFIG_PINGER_TIME_MAX) && (data.inet.loss_avg < CONFIG_PINGER_LOSS_MAX))
+          if ((data.inet.duration_ms_avg < CONFIG_PINGER_MAX_DURATION_INET) && (data.inet.loss_avg < CONFIG_PINGER_MAX_LOSS_INET))
         #else 
-          if ((data.inet.duration_ms_max < CONFIG_PINGER_TIME_MAX) && (data.inet.loss_max < CONFIG_PINGER_LOSS_MAX))
+          if ((data.inet.duration_ms_max < CONFIG_PINGER_MAX_DURATION_INET) && (data.inet.loss_max < CONFIG_PINGER_MAX_LOSS_INET))
         #endif // CONFIG_PINGER_TOTAL_RESULT_MODE
         {
           new_state = PING_AVAILABLE;
