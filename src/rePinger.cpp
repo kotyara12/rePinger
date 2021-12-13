@@ -339,8 +339,6 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
 
     // Batch of ping operations
     struct timeval timeSend, timeEnd;
-    esp_err_t send_ret;
-    int recv_ret;
     for (uint32_t i = 0; i < ep->count; i++) {
       esp_err_t send_ret = pingerSend(ep);
       gettimeofday(&timeSend, NULL);
@@ -348,7 +346,7 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
         ep->total_state = PING_FAILED;
         goto err;
       };
-      recv_ret = pingerReceive(ep);
+      int recv_ret = pingerReceive(ep);
       gettimeofday(&timeEnd, NULL);
       ep->elapsed_time_ms = PING_TIME_DIFF_MS(timeEnd, timeSend);
       if (ep->elapsed_time_ms > 1000000000) {
