@@ -14,7 +14,11 @@ char* mqttTopicPingerCreate(const bool primary)
 {
   if (_mqttTopicPing) free(_mqttTopicPing);
   _mqttTopicPing = mqttGetTopicDevice1(primary, CONFIG_MQTT_PINGER_LOCAL, CONFIG_MQTT_PINGER_TOPIC);
-  rlog_i(tagPMQTT, "Generated topic for publishing ping result: [ %s ]", _mqttTopicPing);
+  if (_mqttTopicPing) {
+    rlog_i(tagPMQTT, "Generated topic for publishing ping result: [ %s ]", _mqttTopicPing);
+  } else {
+    rlog_e(tagPMQTT, "Failed to generate topic for publishing ping result");
+  };
   return _mqttTopicPing;
 }
 

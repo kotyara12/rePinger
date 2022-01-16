@@ -20,6 +20,7 @@
 #include "rePinger.h"
 #include "reEvents.h"
 #include "reWiFi.h"
+#include "reEsp32.h"
 #if CONFIG_MQTT_PINGER_ENABLE
 #include "rePingerMqtt.h"
 #endif // CONFIG_MQTT_PINGER_ENABLE
@@ -202,7 +203,7 @@ static esp_err_t pingerInitSession(pinger_data_t *ep,
 
   // Allocating memory for a data packet
   ep->icmp_pkt_size = sizeof(struct icmp_echo_hdr) + datasize;
-  ep->packet_hdr = (icmp_echo_hdr*)mem_calloc(1, ep->icmp_pkt_size);
+  ep->packet_hdr = (icmp_echo_hdr*)esp_calloc(1, ep->icmp_pkt_size);
   PING_CHECK(ep->packet_hdr, "No memory for echo packet", err, ESP_ERR_NO_MEM);
 
   // Set ICMP type and code field
