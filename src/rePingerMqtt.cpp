@@ -280,7 +280,7 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
 
 void pingerMqttPublish(ping_publish_data_t* data)
 {
-  if ((_mqttTopicPing) && mqttIsConnected()) {
+  if ((_mqttTopicPing) && (data) && mqttIsConnected()) {
     #if CONFIG_MQTT_PINGER_AS_PLAIN
       pingerMqttPublishHostPlain("host1", &data->host1);
       #ifdef CONFIG_PINGER_HOST_2
@@ -341,8 +341,10 @@ static void pingerMqttEventHandler(void* arg, esp_event_base_t event_base, int32
 {
   // MQTT connected
   if (event_id == RE_MQTT_CONNECTED) {
-    re_mqtt_event_data_t* data = (re_mqtt_event_data_t*)event_data;
-    mqttTopicPingerCreate(data->primary);
+    if (event_data) {
+      re_mqtt_event_data_t* data = (re_mqtt_event_data_t*)event_data;
+      mqttTopicPingerCreate(data->primary);
+    };
   } 
   // MQTT disconnected
   else if ((event_id == RE_MQTT_CONN_LOST) || (event_id == RE_MQTT_CONN_FAILED)) {

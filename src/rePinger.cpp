@@ -736,7 +736,7 @@ bool pingerTaskDelete()
 // -------------------------------------------------- WiFi event handler -------------------------------------------------
 // -----------------------------------------------------------------------------------------------------------------------
 
-static void pingerEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+static void pingerWifiEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
   // STA connected & got IP
   if (event_id == RE_WIFI_STA_GOT_IP) {
@@ -758,9 +758,22 @@ static void pingerEventHandler(void* arg, esp_event_base_t event_base, int32_t e
   }
 }
 
+static void pingerOtaEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+{
+  if ((event_id == RE_SYS_OTA) && (event_data)) {
+    re_system_event_data_t* data = (re_system_event_data_t*)event_data;
+    if (data->type == RE_SYS_SET) {
+      pingerTaskSuspend();
+    } else {
+      pingerTaskResume();
+    };
+  };
+}
+
 bool pingerEventHandlerRegister()
 {
-  bool ret = eventHandlerRegister(RE_WIFI_EVENTS, ESP_EVENT_ANY_ID, &pingerEventHandler, nullptr);
+  bool ret = eventHandlerRegister(RE_WIFI_EVENTS, ESP_EVENT_ANY_ID, &pingerWifiEventHandler, nullptr);
+  ret = ret && eventHandlerRegister(RE_SYSTEM_EVENTS, RE_SYS_OTA, &pingerOtaEventHandler, nullptr);
   #if CONFIG_MQTT_PINGER_ENABLE
     ret = ret && pingerMqttRegister();
   #endif // CONFIG_MQTT_PINGER_ENABLE
