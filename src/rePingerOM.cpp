@@ -13,8 +13,6 @@
 #include "reWiFi.h"
 #endif // CONFIG_OPENMON_PINGER_RSSI
 
-static const char *tagPOM = "PING";
-
 void pingerOpenMonInit()
 {
   omControllerInit(CONFIG_OPENMON_PINGER_ID, CONFIG_OPENMON_PINGER_TOKEN, CONFIG_OPENMON_PINGER_INTERVAL);
@@ -47,7 +45,7 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
                   data->host1.state, data->host1.duration_ms, data->host1.loss,
                   data->host2.state, data->host2.duration_ms, data->host2.loss,
                   data->host3.state, data->host3.duration_ms, data->host3.loss,
-                  data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
             #else
               omSend(CONFIG_OPENMON_PINGER_ID, 
                 malloc_stringf("p1=%d&p2=%f&p3=%f&p4=%d&p5=%d&p6=%f&p7=%d&p8=%d&p9=%f&p10=%d&p11=%d&p12=%d&p13=%d&p14=%f&p15=%f&p16=%f",
@@ -55,7 +53,7 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
                   heap_free, 100.0*heap_free/heap_total,
                   data->host1.state, data->host1.duration_ms, data->host1.loss,
                   data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
             #endif // CONFIG_PINGER_HOST_3
           #else
             omSend(CONFIG_OPENMON_PINGER_ID, 
@@ -63,7 +61,7 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
                 wifi_info.rssi,
                 heap_free, 100.0*heap_free/heap_total,
                 data->host1.state, data->host1.duration_ms, data->host1.loss,
-                data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
           #endif // CONFIG_PINGER_HOST_2
 
         #else
@@ -74,7 +72,7 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
             malloc_stringf("p1=%d&p2=%f&p3=%f&p4=%d&p5=%d&p6=%d&p7=%d&p8=%f&p9=%f&p10=%f",
               wifi_info.rssi,
               heap_free, 100.0*heap_free/heap_total,
-              data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+              data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
 
         #endif // CONFIG_OPENMON_PINGER_HOSTS
       #else
@@ -90,21 +88,21 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
                   data->host1.state, data->host1.duration_ms, data->host1.loss,
                   data->host2.state, data->host2.duration_ms, data->host2.loss,
                   data->host3.state, data->host3.duration_ms, data->host3.loss,
-                  data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
             #else
               omSend(CONFIG_OPENMON_PINGER_ID, 
                 malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%f&p5=%d&p6=%d&p7=%f&p8=%d&p9=%d&p10=%d&p11=%d&p12=%f&p13=%f&p14=%f",
                   wifi_info.rssi,
                   data->host1.state, data->host1.duration_ms, data->host1.loss,
                   data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
             #endif // CONFIG_PINGER_HOST_3
           #else
             omSend(CONFIG_OPENMON_PINGER_ID, 
               malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%f&p5=%d&p6=%d&p7=%d&p8=%d&p9=%f&p10=%f&p11=%f",
                 wifi_info.rssi,
                 data->host1.state, data->host1.duration_ms, data->host1.loss,
-                data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
           #endif // CONFIG_PINGER_HOST_2
         
         #else
@@ -114,7 +112,7 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
           omSend(CONFIG_OPENMON_PINGER_ID, 
             malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%d&p5=%d&p6=%f&p7=%f&p8=%f",
               wifi_info.rssi,
-              data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+              data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
 
         #endif // CONFIG_OPENMON_PINGER_HOSTS
       #endif // CONFIG_OPENMON_PINGER_HEAP_FREE
@@ -132,21 +130,21 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
                   data->host1.state, data->host1.duration_ms, data->host1.loss,
                   data->host2.state, data->host2.duration_ms, data->host2.loss,
                   data->host3.state, data->host3.duration_ms, data->host3.loss,
-                  data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
             #else
               omSend(CONFIG_OPENMON_PINGER_ID, 
                 malloc_stringf("p1=%f&p2=%f&p3=%d&p4=%d&p5=%f&p6=%d&p7=%d&p8=%f&p9=%d&p10=%d&p11=%d&p12=%d&p13=%f&p14=%f&p15=%f",
                   heap_free, 100.0*heap_free/heap_total,
                   data->host1.state, data->host1.duration_ms, data->host1.loss,
                   data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
             #endif // CONFIG_PINGER_HOST_3
           #else
             omSend(CONFIG_OPENMON_PINGER_ID, 
               malloc_stringf("p1=%f&p2=%f&p3=%d&p4=%d&p5=%f&p6=%d&p7=%d&p8=%d&p9=%d&p10=%f&p11=%f&p12=%f",
                 heap_free, 100.0*heap_free/heap_total,
                 data->host1.state, data->host1.duration_ms, data->host1.loss,
-                data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
           #endif // CONFIG_PINGER_HOST_2
 
         #else
@@ -156,7 +154,7 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
           omSend(CONFIG_OPENMON_PINGER_ID, 
             malloc_stringf("p1=%f&p2=%f&p3=%d&p4=%d&p5=%d&p6=%d&p7=%f&p8=%f&p9=%f",
               heap_free, 100.0*heap_free/heap_total,
-              data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+              data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
 
         #endif // CONFIG_OPENMON_PINGER_HOSTS
       #else
@@ -171,19 +169,19 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
                   data->host1.state, data->host1.duration_ms, data->host1.loss,
                   data->host2.state, data->host2.duration_ms, data->host2.loss,
                   data->host3.state, data->host3.duration_ms, data->host3.loss,
-                  data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
             #else
               omSend(CONFIG_OPENMON_PINGER_ID, 
                 malloc_stringf("p1=%d&p2=%d&p3=%f&p4=%d&p5=%d&p6=%f&p7=%d&p8=%d&p9=%d&p10=%d&p11=%f&p12=%f&p13=%f",
                   data->host1.state, data->host1.duration_ms, data->host1.loss,
                   data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
             #endif // CONFIG_PINGER_HOST_3
           #else
             omSend(CONFIG_OPENMON_PINGER_ID, 
               malloc_stringf("p1=%d&p2=%d&p3=%f&p4=%d&p5=%d&p6=%d&p7=%d&p8=%f&p9=%f&p10=%f",
                 data->host1.state, data->host1.duration_ms, data->host1.loss,
-                data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+                data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
           #endif // CONFIG_PINGER_HOST_2
         #else
 
@@ -191,7 +189,7 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
 
           omSend(CONFIG_OPENMON_PINGER_ID, 
             malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%d&p5=%f&p6=%f&p7=%f",
-              data->inet.state, data->inet.duration_ms_min, data->inet.duration_ms_avg, data->inet.duration_ms_max, data->inet.loss_min, data->inet.loss_avg, data->inet.loss_max));
+              data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
 
         #endif // CONFIG_OPENMON_PINGER_HOSTS
       #endif // CONFIG_OPENMON_PINGER_HEAP_FREE

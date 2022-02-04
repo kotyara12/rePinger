@@ -5,9 +5,11 @@
 #include "rLog.h"
 #include "rePingerMqtt.h"
 #include "rStrings.h"
+#include "reEsp32.h"
 #include "reMqtt.h"
+#include "reStates.h"
 
-static const char *tagPMQTT = "PING";
+static const char *logTAG = "PING";
 static char* _mqttTopicPing = nullptr;
 
 char* mqttTopicPingerCreate(const bool primary)
@@ -15,9 +17,9 @@ char* mqttTopicPingerCreate(const bool primary)
   if (_mqttTopicPing) free(_mqttTopicPing);
   _mqttTopicPing = mqttGetTopicDevice1(primary, CONFIG_MQTT_PINGER_LOCAL, CONFIG_MQTT_PINGER_TOPIC);
   if (_mqttTopicPing) {
-    rlog_i(tagPMQTT, "Generated topic for publishing ping result: [ %s ]", _mqttTopicPing);
+    rlog_i(logTAG, "Generated topic for publishing ping result: [ %s ]", _mqttTopicPing);
   } else {
-    rlog_e(tagPMQTT, "Failed to generate topic for publishing ping result");
+    rlog_e(logTAG, "Failed to generate topic for publishing ping result");
   };
   return _mqttTopicPing;
 }
@@ -31,7 +33,7 @@ void mqttTopicPingerFree()
 {
   if (_mqttTopicPing) free(_mqttTopicPing);
   _mqttTopicPing = nullptr;
-  rlog_d(tagPMQTT, "Topic for publishing ping result has been scrapped");
+  rlog_d(logTAG, "Topic for publishing ping result has been scrapped");
 }
 
 #if CONFIG_MQTT_PINGER_AS_PLAIN
@@ -39,46 +41,58 @@ void mqttTopicPingerFree()
 void pingerMqttPublishHostPlain(const char* topic, ping_host_data_t* data)
 {
   char* _mqttTopicPingHost = mqttGetSubTopic(_mqttTopicPing, topic);
-  if (_mqttTopicPingHost) {
-    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "hostname"), 
-      (char*)data->host_name, 
-      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, false);
-    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "state"), 
-      malloc_stringf("%d", data->state), 
-      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "packets/transmitted"), 
-      malloc_stringf("%d", data->transmitted), 
-      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "packets/received"), 
-      malloc_stringf("%d", data->received), 
-      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "packets/ttl"), 
-      malloc_stringf("%d", data->ttl), 
-      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  RE_MEM_CHECK(logTAG, _mqttTopicPingHost, return);
 
+  mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "hostname"), 
+    (char*)data->host_name, 
+    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, false);
+  mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "state"), 
+    malloc_stringf("%d", data->state), 
+    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "packets/transmitted"), 
+    malloc_stringf("%d", data->transmitted), 
+    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "packets/received"), 
+    malloc_stringf("%d", data->received), 
+    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "packets/ttl"), 
+    malloc_stringf("%d", data->ttl), 
+    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+
+  #if CONFIG_SENSOR_STRING_ENABLE
     mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "duration/" CONFIG_SENSOR_NUMERIC_VALUE), 
       malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms), 
       CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
     mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "duration/" CONFIG_SENSOR_STRING_VALUE), 
       malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_STRING, data->duration_ms), 
       CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-      
+  #else
+    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "duration"), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
+    
+  #if CONFIG_SENSOR_STRING_ENABLE
     mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "loss/" CONFIG_SENSOR_NUMERIC_VALUE), 
       malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss), 
       CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
     mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "loss/" CONFIG_SENSOR_STRING_VALUE), 
       malloc_stringf(CONFIG_FORMAT_PING_LOSS_STRING, data->loss), 
       CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-
-    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "unavailable/time/unix"), 
-      malloc_stringf("%d", data->time_unavailable), 
+  #else
+    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "loss"), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss), 
       CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-    mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "unavailable/time/string"), 
-      malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable), 
-      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
 
-    free(_mqttTopicPingHost);
-  };
+  mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "unavailable/time/unix"), 
+    malloc_stringf("%d", data->time_unavailable), 
+    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  mqttPublish(mqttGetSubTopic(_mqttTopicPingHost, "unavailable/time/string"), 
+    malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable), 
+    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+
+  free(_mqttTopicPingHost);
 }
 
 void pingerMqttPublishInetPlain(ping_inet_data_t* data)
@@ -87,40 +101,83 @@ void pingerMqttPublishInetPlain(ping_inet_data_t* data)
     malloc_stringf("%d", data->state), 
     CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
 
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/min/" CONFIG_SENSOR_NUMERIC_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_min), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/min/" CONFIG_SENSOR_STRING_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_STRING, data->duration_ms_min), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #if CONFIG_SENSOR_STRING_ENABLE
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/min/" CONFIG_SENSOR_NUMERIC_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_min), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/min/" CONFIG_SENSOR_STRING_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_STRING, data->duration_ms_min), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #else
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/min"), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_min), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
 
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/avg/" CONFIG_SENSOR_NUMERIC_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_avg), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/avg/" CONFIG_SENSOR_STRING_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_STRING, data->duration_ms_avg), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #if CONFIG_SENSOR_STRING_ENABLE
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/max/" CONFIG_SENSOR_NUMERIC_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_max), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/max/" CONFIG_SENSOR_STRING_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_STRING, data->duration_ms_max), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #else
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/max"), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_max), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
 
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/max/" CONFIG_SENSOR_NUMERIC_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_max), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/max/" CONFIG_SENSOR_STRING_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_STRING, data->duration_ms_max), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #if CONFIG_SENSOR_STRING_ENABLE
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/total/" CONFIG_SENSOR_NUMERIC_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_total), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/total/" CONFIG_SENSOR_STRING_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_STRING, data->duration_ms_total), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #else
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/duration/total"), 
+      malloc_stringf(CONFIG_FORMAT_PING_TIMERESP_VALUE, data->duration_ms_total), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
 
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/min/" CONFIG_SENSOR_NUMERIC_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss_min), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/min/" CONFIG_SENSOR_STRING_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_LOSS_STRING, data->loss_min), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #if CONFIG_SENSOR_STRING_ENABLE
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/min/" CONFIG_SENSOR_NUMERIC_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss_min), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/min/" CONFIG_SENSOR_STRING_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_STRING, data->loss_min), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #else
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/min"), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss_min), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
 
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/max/" CONFIG_SENSOR_NUMERIC_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss_max), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
-  mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/max/" CONFIG_SENSOR_STRING_VALUE), 
-    malloc_stringf(CONFIG_FORMAT_PING_LOSS_STRING, data->loss_max), 
-    CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #if CONFIG_SENSOR_STRING_ENABLE
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/max/" CONFIG_SENSOR_NUMERIC_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss_max), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/max/" CONFIG_SENSOR_STRING_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_STRING, data->loss_max), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #else
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/max"), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss_max), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
+
+  #if CONFIG_SENSOR_STRING_ENABLE
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/total/" CONFIG_SENSOR_NUMERIC_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss_total), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/total/" CONFIG_SENSOR_STRING_VALUE), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_STRING, data->loss_total), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #else
+    mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/loss/total"), 
+      malloc_stringf(CONFIG_FORMAT_PING_LOSS_VALUE, data->loss_total), 
+      CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
 
   mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/unavailable/time/unix"), 
     malloc_stringf("%d", data->time_unavailable), 
@@ -137,17 +194,17 @@ void pingerMqttPublishInetPlain(ping_inet_data_t* data)
     switch (data->state) {
       case PING_AVAILABLE:
         mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/" CONFIG_SENSOR_DISPLAY), 
-          malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_OK, data->duration_ms_min, data->loss_min), 
+          malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_OK, data->duration_ms_total, data->loss_total), 
           CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
         break;
       case PING_BAD:
         mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/" CONFIG_SENSOR_DISPLAY), 
-          malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_BAD, data->duration_ms_min, data->loss_min), 
+          malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_BAD, data->duration_ms_total, data->loss_total), 
           CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
         break;
       default:
         mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/" CONFIG_SENSOR_DISPLAY), 
-          malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_UNAVAILABLED, data->duration_ms_min, data->loss_min), 
+          malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_UNAVAILABLED, data->duration_ms_total, data->loss_total), 
           CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
         break;
     }
@@ -163,10 +220,19 @@ char* pingerMqttPublishHostJson(ping_host_data_t* data)
 
   char* json_packets = malloc_stringf("\"packets\":{\"transmitted\":%d,\"received\":%d,\"ttl\":%d}", 
     data->transmitted, data->received, data->ttl);
-  char* json_duration = malloc_stringf("\"duration\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_TIMERESP_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_TIMERESP_STRING "\"}", 
-    data->duration_ms, data->duration_ms);
-  char* json_loss = malloc_stringf("\"loss\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_LOSS_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_LOSS_STRING "\"}", 
-    data->loss, data->loss);
+
+  #if CONFIG_SENSOR_STRING_ENABLE
+    char* json_duration = malloc_stringf("\"duration\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_TIMERESP_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_TIMERESP_STRING "\"}", 
+      data->duration_ms, data->duration_ms);
+    char* json_loss = malloc_stringf("\"loss\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_LOSS_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_LOSS_STRING "\"}", 
+      data->loss, data->loss);
+  #else
+    char* json_duration = malloc_stringf("\"duration\":" CONFIG_FORMAT_PING_TIMERESP_VALUE, 
+      data->duration_ms);
+    char* json_loss = malloc_stringf("\"loss\":" CONFIG_FORMAT_PING_LOSS_VALUE, 
+      data->loss);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
+
   char* json_unavailable = nullptr;
     if (data->state > PING_BAD) {
     char* s_unavailable = malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable);
@@ -199,33 +265,58 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
 {
   char* json_inet = nullptr;
 
+  // Durations
   char* json_duration = nullptr;
-  char* json_duration_min = malloc_stringf("\"min\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_TIMERESP_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_TIMERESP_STRING "\"}", 
-    data->duration_ms_min, data->duration_ms_min);
-  char* json_duration_avg = malloc_stringf("\"avg\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_TIMERESP_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_TIMERESP_STRING "\"}", 
-    data->duration_ms_avg, data->duration_ms_avg);
-  char* json_duration_max = malloc_stringf("\"max\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_TIMERESP_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_TIMERESP_STRING "\"}", 
-    data->duration_ms_max, data->duration_ms_max);
-  if ((json_duration_min) && (json_duration_avg) && (json_duration_max)) {
+  #if CONFIG_SENSOR_STRING_ENABLE
+    char* json_duration_min = malloc_stringf("\"min\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_TIMERESP_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_TIMERESP_STRING "\"}", 
+      data->duration_ms_min, data->duration_ms_min);
+    char* json_duration_max = malloc_stringf("\"max\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_TIMERESP_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_TIMERESP_STRING "\"}", 
+      data->duration_ms_max, data->duration_ms_max);
+    char* json_duration_total = malloc_stringf("\"total\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_TIMERESP_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_TIMERESP_STRING "\"}", 
+      data->duration_ms_total, data->duration_ms_total);
+  #else
+    char* json_duration_min = malloc_stringf("\"min\":" CONFIG_FORMAT_PING_TIMERESP_VALUE, 
+      data->duration_ms_min);
+    char* json_duration_max = malloc_stringf("\"max\":" CONFIG_FORMAT_PING_TIMERESP_VALUE, 
+      data->duration_ms_max);
+    char* json_duration_total = malloc_stringf("\"total\":" CONFIG_FORMAT_PING_TIMERESP_VALUE, 
+      data->duration_ms_total);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
+
+  if ((json_duration_min) && (json_duration_max) && (json_duration_total)) {
     json_duration = malloc_stringf("\"duration\":{%s,%s,%s}", 
-      json_duration_min, json_duration_avg, json_duration_max);
+      json_duration_min, json_duration_max, json_duration_total);
   };
   if (json_duration_min) free(json_duration_min);
-  if (json_duration_avg) free(json_duration_avg);
   if (json_duration_max) free(json_duration_max);
+  if (json_duration_total) free(json_duration_total);
 
+  // Losses
   char* json_loss = nullptr;
-  char* json_loss_min = malloc_stringf("\"min\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_LOSS_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_LOSS_STRING "\"}", 
-    data->loss_min, data->loss_min);
-  char* json_loss_max = malloc_stringf("\"max\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_LOSS_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_LOSS_STRING "\"}", 
-    data->loss_max, data->loss_max);
-  if ((json_loss_min) && (json_loss_max)) {
-    json_loss = malloc_stringf("\"loss\":{%s,%s}", 
-      json_loss_min, json_loss_max);
+  #if CONFIG_SENSOR_STRING_ENABLE
+    char* json_loss_min = malloc_stringf("\"min\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_LOSS_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_LOSS_STRING "\"}", 
+      data->loss_min, data->loss_min);
+    char* json_loss_max = malloc_stringf("\"max\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_LOSS_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_LOSS_STRING "\"}", 
+      data->loss_max, data->loss_max);
+    char* json_loss_total = malloc_stringf("\"total\":{\"" CONFIG_SENSOR_NUMERIC_VALUE "\":" CONFIG_FORMAT_PING_LOSS_VALUE ",\"" CONFIG_SENSOR_STRING_VALUE "\":\"" CONFIG_FORMAT_PING_LOSS_STRING "\"}", 
+      data->loss_total, data->loss_total);
+  #else
+    char* json_loss_min = malloc_stringf("\"min\":" CONFIG_FORMAT_PING_LOSS_VALUE, 
+      data->loss_min);
+    char* json_loss_max = malloc_stringf("\"max\":" CONFIG_FORMAT_PING_LOSS_VALUE, 
+      data->loss_max);
+    char* json_loss_total = malloc_stringf("\"total\":" CONFIG_FORMAT_PING_LOSS_VALUE, 
+      data->loss_total);
+  #endif // CONFIG_SENSOR_STRING_ENABLE
+  if ((json_loss_min) && (json_loss_max) && (json_loss_total)) {
+    json_loss = malloc_stringf("\"loss\":{%s,%s,%s}", 
+      json_loss_min, json_loss_max, json_loss_total);
   };
   if (json_loss_min) free(json_loss_min);
   if (json_loss_max) free(json_loss_max);
+  if (json_loss_total) free(json_loss_total);
 
+  // Timestamps and summary
   char* json_unavailable = nullptr;
   if (data->state > PING_BAD) {
     char* s_unavailable = malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable);
@@ -241,19 +332,19 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
       case PING_AVAILABLE:
         if ((json_duration) && (json_loss)) {
           json_inet = malloc_stringf("{\"state\":%d,%s,%s,\"%s\":\"" CONFIG_FORMAT_PING_MIXED "\"}",
-            data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_OK, data->duration_ms_min, data->loss_min);
+            data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_OK, data->duration_ms_total, data->loss_total);
         };
         break;
       case PING_BAD:
         if ((json_duration) && (json_loss)) {
           json_inet = malloc_stringf("{\"state\":%d,%s,%s,\"%s\":\"" CONFIG_FORMAT_PING_MIXED "\"}",
-            data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_BAD, data->duration_ms_min, data->loss_min);
+            data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_BAD, data->duration_ms_total, data->loss_total);
         };
         break;
       default:
         if ((json_duration) && (json_loss) && (json_unavailable)) {
           json_inet = malloc_stringf("{\"state\":%d,%s,%s,%s,\"%s\":\"" CONFIG_FORMAT_PING_MIXED "\"}",
-            data->state, json_duration, json_loss, json_unavailable, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_UNAVAILABLED, data->duration_ms_min, data->loss_min);
+            data->state, json_duration, json_loss, json_unavailable, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_UNAVAILABLED, data->duration_ms_total, data->loss_total);
         };
         break;
     }
@@ -280,7 +371,7 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
 
 void pingerMqttPublish(ping_publish_data_t* data)
 {
-  if ((_mqttTopicPing) && (data) && mqttIsConnected()) {
+  if ((_mqttTopicPing) && (data) && statesMqttIsEnabled()) {
     #if CONFIG_MQTT_PINGER_AS_PLAIN
       pingerMqttPublishHostPlain("host1", &data->host1);
       #ifdef CONFIG_PINGER_HOST_2

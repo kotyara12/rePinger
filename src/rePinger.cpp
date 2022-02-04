@@ -46,8 +46,7 @@ static const uint8_t PING_STOP  = BIT1;
 #define PING_SET_MIN(value_a, min_a, value_b, limit_b) if ((value_a < min_a) & (value_b < limit_b)) { min_a = value_a; }
 #define PING_SET_MAX(value_a, max_b) if (value_a > max_b) { max_b = value_a; }
 
-#define PING_TIME_DIFF_MS(_end, _start) ((uint32_t)(((_end).tv_sec - (_start).tv_sec) * 1000 + \
-                                                    ((_end).tv_usec - (_start).tv_usec) / 1000))
+#define PING_TIME_DIFF_MS(_end, _start) ((uint32_t)(((_end).tv_sec - (_start).tv_sec) * 1000 + ((_end).tv_usec - (_start).tv_usec) / 1000))
 
 typedef struct {
     const char* host_name;
@@ -311,7 +310,9 @@ static void pingerCopyHostData(pinger_data_t *ep, ping_host_data_t* host_data)
 
 static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_availavble, re_ping_event_id_t evid_unavailavble)
 {
-  rlog_i(logTAG, "Ping host [ %s ]...", ep->host_name);
+  #if CONFIG_PING_SHOW_INTERMEDIATE
+  rlog_d(logTAG, "Ping host [ %s ]...", ep->host_name);
+  #endif // CONFIG_PING_SHOW_INTERMEDIATE
 
   // Check the validity period of the IP address
   if ((ep->sock > 0) && ((ep->received == 0) || ((xTaskGetTickCount() - ep->host_resolved) > pdMS_TO_TICKS(CONFIG_PINGER_IP_VALIDITY)))) {
@@ -436,10 +437,17 @@ static void pingerExec(void *args)
   data.inet.state = PING_FAILED;
   data.inet.time_unavailable = 0;
   static bool pingEnabled = true;
+  static bool pingLastOk = true;
   static BaseType_t waitResult;
   static uint32_t waitFlags;
   static TickType_t lastCheck = 0;
   static TickType_t waitTicks = 0;
+  ping_state_t inet_state;
+  #if (CONFIG_PINGER_FILTER_MODE > 0) && (CONFIG_PINGER_FILTER_SIZE > 0)
+  static bool bufReset = true;
+  static uint8_t bufIndex = 0;
+  static uint32_t bufDuration[CONFIG_PINGER_FILTER_SIZE];
+  #endif // CONFIG_PINGER_FILTER_MODE
 
   static pinger_data_t pdHost1;
   pingerInitSession(&pdHost1, CONFIG_PINGER_HOST_1, 7001, 
@@ -514,85 +522,145 @@ static void pingerExec(void *args)
 
       // Check hosts
       data.inet.hosts_available = 0;
-      data.inet.duration_ms_avg = 0;
       data.inet.duration_ms_min = 0;
       data.inet.duration_ms_max = 0;
       data.inet.loss_min = 0;
       data.inet.loss_max = 0;
+
+      // Host 1
       if (pingerCheckHost(&pdHost1, RE_PING_HOST_AVAILABLE, RE_PING_HOST_UNAVAILABLE) < PING_UNAVAILABLE) {
         data.inet.hosts_available++;
-        data.inet.duration_ms_avg = pdHost1.total_duration_ms;
-        data.inet.duration_ms_min = pdHost1.total_duration_ms;
-        data.inet.duration_ms_max = pdHost1.total_duration_ms;
-        data.inet.loss_min = pdHost1.total_loss;
-        data.inet.loss_max = pdHost1.total_loss;
       };
+      data.inet.duration_ms_min = pdHost1.total_duration_ms;
+      data.inet.duration_ms_max = pdHost1.total_duration_ms;
+      data.inet.duration_ms_total = pdHost1.total_duration_ms;
+      data.inet.loss_min = pdHost1.total_loss;
+      data.inet.loss_max = pdHost1.total_loss;
+      data.inet.loss_total = pdHost1.total_loss;
       pingerCopyHostData(&pdHost1, &data.host1);
+
+      // Host 2
       #ifdef CONFIG_PINGER_HOST_2
-      if (pingerCheckHost(&pdHost2, RE_PING_HOST_AVAILABLE, RE_PING_HOST_UNAVAILABLE) < PING_UNAVAILABLE) {
-        data.inet.hosts_available++;
-        data.inet.duration_ms_avg = (pdHost1.total_duration_ms + pdHost2.total_duration_ms) / 2;
-        data.inet.loss_avg = (pdHost1.total_loss + pdHost2.total_loss) / 2;
-        PING_SET_MIN(pdHost2.total_duration_ms, data.inet.duration_ms_min, pdHost2.total_loss, CONFIG_PINGER_MAX_LOSS_INET);
+        if (pingerCheckHost(&pdHost2, RE_PING_HOST_AVAILABLE, RE_PING_HOST_UNAVAILABLE) < PING_UNAVAILABLE) {
+          data.inet.hosts_available++;
+        };
+        data.inet.duration_ms_total = (pdHost1.total_duration_ms + pdHost2.total_duration_ms) / 2;
+        data.inet.loss_total = (pdHost1.total_loss + pdHost2.total_loss) / 2;
+        PING_SET_MIN(pdHost2.total_duration_ms, data.inet.duration_ms_min, pdHost2.total_loss, CONFIG_PINGER_SLOW_MAX_LOSS);
         PING_SET_MAX(pdHost2.total_duration_ms, data.inet.duration_ms_max);
-        PING_SET_MIN(pdHost2.total_loss, data.inet.loss_min, pdHost2.total_duration_ms, CONFIG_PINGER_MAX_DURATION_INET);
+        PING_SET_MIN(pdHost2.total_loss, data.inet.loss_min, pdHost2.total_duration_ms, CONFIG_PINGER_SLOW_MAX_DURATION);
         PING_SET_MAX(pdHost2.total_loss, data.inet.loss_max);
-      };
-      pingerCopyHostData(&pdHost2, &data.host2);
+        pingerCopyHostData(&pdHost2, &data.host2);
       #endif // CONFIG_PINGER_HOST_2
+
+      // Host 3
       #ifdef CONFIG_PINGER_HOST_3
-      if (pingerCheckHost(&pdHost3, RE_PING_HOST_AVAILABLE, RE_PING_HOST_UNAVAILABLE) < PING_UNAVAILABLE) {
-        data.inet.hosts_available++;
-        data.inet.duration_ms_avg = (pdHost1.total_duration_ms + pdHost2.total_duration_ms + pdHost3.total_duration_ms) / 3;
-        data.inet.loss_avg = (pdHost1.total_loss + pdHost2.total_loss + pdHost3.total_loss) / 3;
-        PING_SET_MIN(pdHost3.total_duration_ms, data.inet.duration_ms_min, pdHost3.total_loss, CONFIG_PINGER_MAX_LOSS_INET);
+        if (pingerCheckHost(&pdHost3, RE_PING_HOST_AVAILABLE, RE_PING_HOST_UNAVAILABLE) < PING_UNAVAILABLE) {
+          data.inet.hosts_available++;
+        };
+        data.inet.duration_ms_total = (pdHost1.total_duration_ms + pdHost2.total_duration_ms + pdHost3.total_duration_ms) / 3;
+        data.inet.loss_total = (pdHost1.total_loss + pdHost2.total_loss + pdHost3.total_loss) / 3;
+        PING_SET_MIN(pdHost3.total_duration_ms, data.inet.duration_ms_min, pdHost3.total_loss, CONFIG_PINGER_SLOW_MAX_LOSS);
         PING_SET_MAX(pdHost3.total_duration_ms, data.inet.duration_ms_max);
-        PING_SET_MIN(pdHost3.total_loss, data.inet.loss_min, pdHost3.total_duration_ms, CONFIG_PINGER_MAX_DURATION_INET);
+        PING_SET_MIN(pdHost3.total_loss, data.inet.loss_min, pdHost3.total_duration_ms, CONFIG_PINGER_SLOW_MAX_DURATION);
         PING_SET_MAX(pdHost3.total_loss, data.inet.loss_max);
-      };
-      pingerCopyHostData(&pdHost3, &data.host3);
+        pingerCopyHostData(&pdHost3, &data.host3);
       #endif // CONFIG_PINGER_HOST_3
       
-      // Final results
-      ping_state_t new_state;
+      // Determine the final results by which we will evaluate the status of Internet access
+      #if CONFIG_PINGER_TOTAL_RESULT_MODE == 0
+        data.inet.duration_ms_total = data.inet.duration_ms_min;
+        data.inet.loss_total = data.inet.loss_min;
+      #elif CONFIG_PINGER_TOTAL_RESULT_MODE == 2
+        data.inet.duration_ms_total = data.inet.duration_ms_max;
+        data.inet.loss_total = data.inet.loss_max;
+      #endif // CONFIG_PINGER_TOTAL_RESULT_MODE
+
       if (data.inet.hosts_available > 0) {
-        // At least one host answered
-        data.inet.count_unavailable = 0;
-        // The final result of the check is determined by the best result
-        #if CONFIG_PINGER_TOTAL_RESULT_MODE == 0
-          if ((data.inet.duration_ms_min < CONFIG_PINGER_MAX_DURATION_INET) && (data.inet.loss_min < CONFIG_PINGER_MAX_LOSS_INET))
-        #elif CONFIG_PINGER_TOTAL_RESULT_MODE == 1
-          if ((data.inet.duration_ms_avg < CONFIG_PINGER_MAX_DURATION_INET) && (data.inet.loss_avg < CONFIG_PINGER_MAX_LOSS_INET))
-        #else 
-          if ((data.inet.duration_ms_max < CONFIG_PINGER_MAX_DURATION_INET) && (data.inet.loss_max < CONFIG_PINGER_MAX_LOSS_INET))
-        #endif // CONFIG_PINGER_TOTAL_RESULT_MODE
-        {
-          new_state = PING_AVAILABLE;
-          rlog_i(logTAG, "Internet access is available");
+        pingLastOk = ((data.inet.duration_ms_total < CONFIG_PINGER_SLOW_MAX_DURATION) && (data.inet.loss_total < CONFIG_PINGER_SLOW_MAX_LOSS));
+
+        // Filter for "smoothing" ping results (0 - disabled, 1 - average, 2 - median)
+        #if (CONFIG_PINGER_FILTER_MODE > 0) && (CONFIG_PINGER_FILTER_SIZE > 0)
+          if (bufReset) {
+            bufReset = false;
+            for (uint8_t i = 0; i < CONFIG_PINGER_FILTER_SIZE; i++) {
+              bufDuration[i] = data.inet.duration_ms_total;
+            };
+          } else {
+            bufDuration[bufIndex] = data.inet.duration_ms_total;
+          };
+
+          #if CONFIG_PINGER_FILTER_MODE == 1
+            // Average
+            uint32_t sumDuration = 0;
+            for (uint8_t i = 0; i < CONFIG_PINGER_FILTER_SIZE; i++) {
+              sumDuration += bufDuration[i];
+            };
+            data.inet.duration_ms_total = sumDuration / CONFIG_PINGER_FILTER_SIZE;
+          #elif CONFIG_PINGER_FILTER_MODE == 2
+            // Median
+            if ((bufIndex < CONFIG_PINGER_FILTER_SIZE - 1) && (bufDuration[bufIndex] > bufDuration[bufIndex + 1])) {
+              for (int i = bufIndex; i < CONFIG_PINGER_FILTER_SIZE - 1; i++) {
+                if (bufDuration[i] > bufDuration[i + 1]) {
+                  uint32_t buff = bufDuration[i];
+                  bufDuration[i] = bufDuration[i + 1];
+                  bufDuration[i + 1] = buff;
+                };
+              };
+            } else {
+              if ((bufIndex > 0) && (bufDuration[bufIndex - 1] > bufDuration[bufIndex])) {
+                for (int i = bufIndex; i > 0; i--) {
+                  if (bufDuration[i] < bufDuration[i - 1]) {
+                    uint32_t buff = bufDuration[i];
+                    bufDuration[i] = bufDuration[i - 1];
+                    bufDuration[i - 1] = buff;
+                  };
+                };
+              };
+            };
+            data.inet.duration_ms_total = bufDuration[CONFIG_PINGER_FILTER_SIZE / 2];
+          #endif // CONFIG_PINGER_FILTER_MODE
+
+          if (++bufIndex >= CONFIG_PINGER_FILTER_SIZE) bufIndex = 0;
+        #endif // CONFIG_PINGER_FILTER_MODE
+
+        // Status analysis by total filtered response time
+        if ((data.inet.duration_ms_total < CONFIG_PINGER_SLOW_MAX_DURATION) && (data.inet.loss_total < CONFIG_PINGER_SLOW_MAX_LOSS)) {
+          inet_state = PING_AVAILABLE;
+          rlog_i(logTAG, "Internet access is available (%d ms)", data.inet.duration_ms_total);
+          // Posting an event only when the status changes
+          if (data.inet.state != inet_state) {
+            data.inet.state = inet_state;
+            eventLoopPost(RE_PING_EVENTS, RE_PING_INET_AVAILABLE, &data.inet, sizeof(data.inet), portMAX_DELAY);
+          };
+          data.inet.time_unavailable = 0;
+          data.inet.count_unavailable = 0;
         } else {
-          new_state = PING_BAD;
-          rlog_w(logTAG, "Internet access is slowed!");
+          inet_state = PING_BAD;
+          rlog_w(logTAG, "Internet access is very slowed (%d ms)", data.inet.duration_ms_total);
+          if (data.inet.time_unavailable == 0) {
+            data.inet.time_unavailable = time(nullptr);
+          };
+          if (data.inet.state != inet_state) {
+            data.inet.state = inet_state;
+            #if defined(CONFIG_PINGER_SLOW_AS_UNAVAILABLE) && CONFIG_PINGER_SLOW_AS_UNAVAILABLE
+              eventLoopPost(RE_PING_EVENTS, RE_PING_INET_UNAVAILABLE, &data.inet, sizeof(data.inet), portMAX_DELAY);
+            #else
+              eventLoopPost(RE_PING_EVENTS, RE_PING_INET_VERY_SLOW, &data.inet, sizeof(data.inet), portMAX_DELAY);
+            #endif // CONFIG_PINGER_SLOW_AS_UNAVAILABLE
+          };
         };
-        // Posting an event only when the status changes
-        if (data.inet.state != new_state) {
-          data.inet.state = new_state;
-          eventLoopPost(RE_PING_EVENTS, RE_PING_INET_AVAILABLE, &data.inet, sizeof(data.inet), portMAX_DELAY);
-        };
-        data.inet.time_unavailable = 0;
       } else {
         // Failed to reach any of the hosts
-        data.inet.loss_min = 100.0;
-        data.inet.loss_max = 100.0;
-        if (data.inet.count_unavailable == 0) {
+        inet_state = PING_UNAVAILABLE;
+        pingLastOk = false;
+        rlog_e(logTAG, "Internet access is not available!");
+        if (data.inet.time_unavailable == 0) {
           data.inet.time_unavailable = time(nullptr);
         };
         data.inet.count_unavailable++;
-        data.inet.state = PING_UNAVAILABLE;
-        rlog_e(logTAG, "Internet access is not available!");
-        // Posting an event until the limit is exceeded
-        if (data.inet.count_unavailable < CONFIG_PINGER_LIMIT_UNAVAILABLE) {
-          eventLoopPost(RE_PING_EVENTS, RE_PING_INET_UNAVAILABLE_UNCONFIRMED, &data.inet, sizeof(data.inet), portMAX_DELAY);
-        } else if (data.inet.count_unavailable == CONFIG_PINGER_LIMIT_UNAVAILABLE) {
+        if ((data.inet.state == PING_AVAILABLE) && (data.inet.count_unavailable >= CONFIG_PINGER_UNAVAILABLE_THRESHOLD)) {
+          data.inet.state = inet_state;
           eventLoopPost(RE_PING_EVENTS, RE_PING_INET_UNAVAILABLE, &data.inet, sizeof(data.inet), portMAX_DELAY);
         };
       };
@@ -606,7 +674,7 @@ static void pingerExec(void *args)
       #endif // CONFIG_OPENMON_ENABLE && CONFIG_OPENMON_PINGER_ENABLE
 
       // Additional checks for individual hosts
-      if (data.inet.state < PING_UNAVAILABLE) {
+      if (data.inet.state == PING_AVAILABLE) {
         #if CONFIG_TELEGRAM_ENABLE & defined(CONFIG_TELEGRAM_HOST_CHECK)
         pingerCheckHost(&pdTelegram, RE_PING_TG_API_AVAILABLE, RE_PING_TG_API_UNAVAILABLE);
         #endif // CONFIG_TELEGRAM_ENABLE && defined(CONFIG_TELEGRAM_HOST_CHECK)
@@ -620,7 +688,7 @@ static void pingerExec(void *args)
       };
 
       // Waiting interval between periodic checks
-      if (data.inet.state == PING_AVAILABLE) {
+      if (pingLastOk) {
         waitTicks = (xTaskGetTickCount() - lastCheck);
         if (pdMS_TO_TICKS(CONFIG_PINGER_INTERVAL_AVAILABLE) > waitTicks) {
           waitTicks = pdMS_TO_TICKS(CONFIG_PINGER_INTERVAL_AVAILABLE) - waitTicks;
