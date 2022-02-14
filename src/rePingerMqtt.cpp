@@ -197,9 +197,9 @@ void pingerMqttPublishInetPlain(ping_inet_data_t* data)
           malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_OK, data->duration_ms_total, data->loss_total), 
           CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
         break;
-      case PING_BAD:
+      case PING_DELAYED:
         mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/" CONFIG_SENSOR_DISPLAY), 
-          malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_BAD, data->duration_ms_total, data->loss_total), 
+          malloc_stringf(CONFIG_FORMAT_PING_MIXED, CONFIG_FORMAT_PING_DELAYED, data->duration_ms_total, data->loss_total), 
           CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, false, true, true);
         break;
       default:
@@ -234,7 +234,7 @@ char* pingerMqttPublishHostJson(ping_host_data_t* data)
   #endif // CONFIG_SENSOR_STRING_ENABLE
 
   char* json_unavailable = nullptr;
-    if (data->state > PING_BAD) {
+    if (data->state > PING_DELAYED) {
     char* s_unavailable = malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable);
     if (s_unavailable) {
       json_unavailable = malloc_stringf("\"unavailable\":{\"time\":{\"unix\":%d,\"string\":\"%s\"}}", 
@@ -318,7 +318,7 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
 
   // Timestamps and summary
   char* json_unavailable = nullptr;
-  if (data->state > PING_BAD) {
+  if (data->state > PING_DELAYED) {
     char* s_unavailable = malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable);
     if (s_unavailable) {
       json_unavailable = malloc_stringf("\"unavailable\":{\"time\":{\"unix\":%d,\"string\":\"%s\"},\"count\":%d}", 
@@ -329,16 +329,16 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
 
   #ifdef CONFIG_FORMAT_PING_MIXED
     switch (data->state) {
-      case PING_AVAILABLE:
+      case PING_OK:
         if ((json_duration) && (json_loss)) {
           json_inet = malloc_stringf("{\"state\":%d,%s,%s,\"%s\":\"" CONFIG_FORMAT_PING_MIXED "\"}",
             data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_OK, data->duration_ms_total, data->loss_total);
         };
         break;
-      case PING_BAD:
+      case PING_DELAYED:
         if ((json_duration) && (json_loss)) {
           json_inet = malloc_stringf("{\"state\":%d,%s,%s,\"%s\":\"" CONFIG_FORMAT_PING_MIXED "\"}",
-            data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_BAD, data->duration_ms_total, data->loss_total);
+            data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_DELAYED, data->duration_ms_total, data->loss_total);
         };
         break;
       default:

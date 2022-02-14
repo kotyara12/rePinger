@@ -193,7 +193,7 @@ static esp_err_t pingerInitSession(pinger_data_t *ep,
   ep->timeout_ms = timeout;
   ep->datasize = datasize;
   ep->count = count;
-  ep->total_state = PING_AVAILABLE;
+  ep->total_state = PING_OK;
   ep->max_duration_ms = max_duration; 
   ep->max_loss = max_loss;
   ep->limit_unavailable = limit_unavailable;
@@ -379,9 +379,9 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
         ep->total_state = PING_UNAVAILABLE;
       } else {
         if ((ep->total_duration_ms < ep->max_duration_ms) && (ep->total_loss < ep->max_loss)) {
-          ep->total_state = PING_AVAILABLE;
+          ep->total_state = PING_OK;
         } else {
-          ep->total_state = PING_BAD;
+          ep->total_state = PING_DELAYED;
         };
       };
     };
@@ -395,7 +395,7 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
     pingerCopyHostData(ep, &host_data);
     
     // Post event
-    if (ep->total_state == PING_AVAILABLE) {
+    if (ep->total_state == PING_OK) {
       if (ep->notify_unavailable || (ep->count_unavailable > 0)) {
         rlog_i(logTAG, "Host [ %s ] is available", ep->host_name);
         host_data.time_unavailable = ep->time_unavailable;
@@ -626,42 +626,51 @@ static void pingerExec(void *args)
 
         // Status analysis by total filtered response time
         if ((data.inet.duration_ms_total < CONFIG_PINGER_SLOW_MAX_DURATION) && (data.inet.loss_total < CONFIG_PINGER_SLOW_MAX_LOSS)) {
-          inet_state = PING_AVAILABLE;
+          inet_state = PING_OK;
           rlog_i(logTAG, "Internet access is available (%d ms)", data.inet.duration_ms_total);
           // Posting an event only when the status changes
           if (data.inet.state != inet_state) {
             data.inet.state = inet_state;
             eventLoopPost(RE_PING_EVENTS, RE_PING_INET_AVAILABLE, &data.inet, sizeof(data.inet), portMAX_DELAY);
+            data.inet.time_unavailable = 0;
           };
-          data.inet.time_unavailable = 0;
-          data.inet.count_unavailable = 0;
         } else {
-          inet_state = PING_BAD;
+          inet_state = PING_DELAYED;
+          pingLastOk = false;
           rlog_w(logTAG, "Internet access is very slowed (%d ms)", data.inet.duration_ms_total);
-          if (data.inet.time_unavailable == 0) {
-            data.inet.time_unavailable = time(nullptr);
-          };
           if (data.inet.state != inet_state) {
+            if (data.inet.time_unavailable == 0) {
+              time_t ts = time(nullptr);
+              if (ts > 1000000000) {
+                data.inet.time_unavailable = ts;
+              };
+            };
             data.inet.state = inet_state;
-            #if defined(CONFIG_PINGER_SLOW_AS_UNAVAILABLE) && CONFIG_PINGER_SLOW_AS_UNAVAILABLE
-              eventLoopPost(RE_PING_EVENTS, RE_PING_INET_UNAVAILABLE, &data.inet, sizeof(data.inet), portMAX_DELAY);
-            #else
-              eventLoopPost(RE_PING_EVENTS, RE_PING_INET_VERY_SLOW, &data.inet, sizeof(data.inet), portMAX_DELAY);
-            #endif // CONFIG_PINGER_SLOW_AS_UNAVAILABLE
+            eventLoopPost(RE_PING_EVENTS, RE_PING_INET_DELAYED, &data.inet, sizeof(data.inet), portMAX_DELAY);
           };
         };
+        data.inet.count_unavailable = 0;
       } else {
         // Failed to reach any of the hosts
         inet_state = PING_UNAVAILABLE;
         pingLastOk = false;
         rlog_e(logTAG, "Internet access is not available!");
-        if (data.inet.time_unavailable == 0) {
-          data.inet.time_unavailable = time(nullptr);
-        };
-        data.inet.count_unavailable++;
-        if ((data.inet.state == PING_AVAILABLE) && (data.inet.count_unavailable >= CONFIG_PINGER_UNAVAILABLE_THRESHOLD)) {
-          data.inet.state = inet_state;
-          eventLoopPost(RE_PING_EVENTS, RE_PING_INET_UNAVAILABLE, &data.inet, sizeof(data.inet), portMAX_DELAY);
+        if (data.inet.state != inet_state) {
+          data.inet.count_unavailable++;
+          if (data.inet.time_unavailable == 0) {
+            time_t ts = time(nullptr);
+            if (ts > 1000000000) {
+              data.inet.time_unavailable = ts;
+            };
+          };
+          if ((data.inet.state == PING_OK) || (data.inet.state == PING_DELAYED)) {
+            if (data.inet.count_unavailable >= CONFIG_PINGER_UNAVAILABLE_THRESHOLD) {
+              data.inet.state = PING_UNAVAILABLE;
+              eventLoopPost(RE_PING_EVENTS, RE_PING_INET_UNAVAILABLE, &data.inet, sizeof(data.inet), portMAX_DELAY);
+            };
+          } else {
+            data.inet.state = PING_UNAVAILABLE;
+          };
         };
       };
 
@@ -674,7 +683,7 @@ static void pingerExec(void *args)
       #endif // CONFIG_OPENMON_ENABLE && CONFIG_OPENMON_PINGER_ENABLE
 
       // Additional checks for individual hosts
-      if (data.inet.state == PING_AVAILABLE) {
+      if (pingLastOk) {
         #if CONFIG_TELEGRAM_ENABLE & defined(CONFIG_TELEGRAM_HOST_CHECK)
         pingerCheckHost(&pdTelegram, RE_PING_TG_API_AVAILABLE, RE_PING_TG_API_UNAVAILABLE);
         #endif // CONFIG_TELEGRAM_ENABLE && defined(CONFIG_TELEGRAM_HOST_CHECK)
