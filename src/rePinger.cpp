@@ -640,13 +640,10 @@ static void pingerExec(void *args)
           rlog_w(logTAG, "Internet access is very slowed (%d ms)", data.inet.duration_ms_total);
           if (data.inet.state != inet_state) {
             if (data.inet.time_unavailable == 0) {
-              time_t ts = time(nullptr);
-              if (ts > 1000000000) {
-                data.inet.time_unavailable = ts;
-              };
+              data.inet.time_unavailable = time(nullptr);
             };
             data.inet.state = inet_state;
-            eventLoopPost(RE_PING_EVENTS, RE_PING_INET_DELAYED, &data.inet, sizeof(data.inet), portMAX_DELAY);
+            eventLoopPost(RE_PING_EVENTS, RE_PING_INET_SLOWDOWN, &data.inet, sizeof(data.inet), portMAX_DELAY);
           };
         };
         data.inet.count_unavailable = 0;
@@ -658,10 +655,7 @@ static void pingerExec(void *args)
         if (data.inet.state != inet_state) {
           data.inet.count_unavailable++;
           if (data.inet.time_unavailable == 0) {
-            time_t ts = time(nullptr);
-            if (ts > 1000000000) {
-              data.inet.time_unavailable = ts;
-            };
+            data.inet.time_unavailable = time(nullptr);
           };
           if ((data.inet.state == PING_OK) || (data.inet.state == PING_DELAYED)) {
             if (data.inet.count_unavailable >= CONFIG_PINGER_UNAVAILABLE_THRESHOLD) {
