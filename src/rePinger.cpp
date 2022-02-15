@@ -637,7 +637,7 @@ static void pingerExec(void *args)
         } else {
           inet_state = PING_DELAYED;
           pingLastOk = false;
-          rlog_w(logTAG, "Internet access is very slowed (%d ms)", data.inet.duration_ms_total);
+          rlog_w(logTAG, "Internet access is slowed (%d ms)", data.inet.duration_ms_total);
           if (data.inet.state != inet_state) {
             if (data.inet.time_unavailable == 0) {
               data.inet.time_unavailable = time(nullptr);
