@@ -546,9 +546,9 @@ static void pingerExec(void *args)
         };
         data.inet.duration_ms_total = (pdHost1.total_duration_ms + pdHost2.total_duration_ms) / 2;
         data.inet.loss_total = (pdHost1.total_loss + pdHost2.total_loss) / 2;
-        PING_SET_MIN(pdHost2.total_duration_ms, data.inet.duration_ms_min, pdHost2.total_loss, CONFIG_PINGER_SLOW_MAX_LOSS);
+        PING_SET_MIN(pdHost2.total_duration_ms, data.inet.duration_ms_min, pdHost2.total_loss, CONFIG_PINGER_UNAVAILABLE_LOSS);
         PING_SET_MAX(pdHost2.total_duration_ms, data.inet.duration_ms_max);
-        PING_SET_MIN(pdHost2.total_loss, data.inet.loss_min, pdHost2.total_duration_ms, CONFIG_PINGER_SLOW_MAX_DURATION);
+        PING_SET_MIN(pdHost2.total_loss, data.inet.loss_min, pdHost2.total_duration_ms, CONFIG_PINGER_UNAVAILABLE_DURATION);
         PING_SET_MAX(pdHost2.total_loss, data.inet.loss_max);
         pingerCopyHostData(&pdHost2, &data.host2);
       #endif // CONFIG_PINGER_HOST_2
@@ -560,9 +560,9 @@ static void pingerExec(void *args)
         };
         data.inet.duration_ms_total = (pdHost1.total_duration_ms + pdHost2.total_duration_ms + pdHost3.total_duration_ms) / 3;
         data.inet.loss_total = (pdHost1.total_loss + pdHost2.total_loss + pdHost3.total_loss) / 3;
-        PING_SET_MIN(pdHost3.total_duration_ms, data.inet.duration_ms_min, pdHost3.total_loss, CONFIG_PINGER_SLOW_MAX_LOSS);
+        PING_SET_MIN(pdHost3.total_duration_ms, data.inet.duration_ms_min, pdHost3.total_loss, CONFIG_PINGER_UNAVAILABLE_LOSS);
         PING_SET_MAX(pdHost3.total_duration_ms, data.inet.duration_ms_max);
-        PING_SET_MIN(pdHost3.total_loss, data.inet.loss_min, pdHost3.total_duration_ms, CONFIG_PINGER_SLOW_MAX_DURATION);
+        PING_SET_MIN(pdHost3.total_loss, data.inet.loss_min, pdHost3.total_duration_ms, CONFIG_PINGER_UNAVAILABLE_DURATION);
         PING_SET_MAX(pdHost3.total_loss, data.inet.loss_max);
         pingerCopyHostData(&pdHost3, &data.host3);
       #endif // CONFIG_PINGER_HOST_3
@@ -576,8 +576,11 @@ static void pingerExec(void *args)
         data.inet.loss_total = data.inet.loss_max;
       #endif // CONFIG_PINGER_TOTAL_RESULT_MODE
 
-      if (data.inet.hosts_available > 0) {
-        pingLastOk = ((data.inet.duration_ms_total < CONFIG_PINGER_SLOW_MAX_DURATION) && (data.inet.loss_total < CONFIG_PINGER_SLOW_MAX_LOSS));
+      // Analyze results and send events
+      if ((data.inet.hosts_available > 0) 
+       && (data.inet.duration_ms_total < CONFIG_PINGER_UNAVAILABLE_DURATION) 
+       && (data.inet.loss_total < CONFIG_PINGER_UNAVAILABLE_LOSS)) {
+        pingLastOk = ((data.inet.duration_ms_total < CONFIG_PINGER_SLOWDOWN_DURATION) && (data.inet.loss_total < CONFIG_PINGER_SLOWDOWN_LOSS));
 
         // Filter for "smoothing" ping results (0 - disabled, 1 - average, 2 - median)
         #if (CONFIG_PINGER_FILTER_MODE > 0) && (CONFIG_PINGER_FILTER_SIZE > 0)
@@ -625,7 +628,7 @@ static void pingerExec(void *args)
         #endif // CONFIG_PINGER_FILTER_MODE
 
         // Status analysis by total filtered response time
-        if ((data.inet.duration_ms_total < CONFIG_PINGER_SLOW_MAX_DURATION) && (data.inet.loss_total < CONFIG_PINGER_SLOW_MAX_LOSS)) {
+        if ((data.inet.duration_ms_total < CONFIG_PINGER_SLOWDOWN_DURATION) && (data.inet.loss_total < CONFIG_PINGER_SLOWDOWN_LOSS)) {
           inet_state = PING_OK;
           rlog_i(logTAG, "Internet access is available (%d ms)", data.inet.duration_ms_total);
           // Posting an event only when the status changes
