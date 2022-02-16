@@ -234,7 +234,7 @@ char* pingerMqttPublishHostJson(ping_host_data_t* data)
   #endif // CONFIG_SENSOR_STRING_ENABLE
 
   char* json_unavailable = nullptr;
-    if (data->state > PING_DELAYED) {
+    if (data->state >= PING_UNAVAILABLE) {
     char* s_unavailable = malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable);
     if (s_unavailable) {
       json_unavailable = malloc_stringf("\"unavailable\":{\"time\":{\"unix\":%d,\"string\":\"%s\"}}", 
@@ -318,7 +318,7 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
 
   // Timestamps and summary
   char* json_unavailable = nullptr;
-  if (data->state > PING_DELAYED) {
+  if (data->state >= PING_UNAVAILABLE) {
     char* s_unavailable = malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable);
     if (s_unavailable) {
       json_unavailable = malloc_stringf("\"unavailable\":{\"time\":{\"unix\":%d,\"string\":\"%s\"},\"count\":%d}", 
@@ -335,10 +335,10 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
             data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_OK, data->duration_ms_total, data->loss_total);
         };
         break;
-      case PING_DELAYED:
+      case PING_SLOWDOWN:
         if ((json_duration) && (json_loss)) {
           json_inet = malloc_stringf("{\"state\":%d,%s,%s,\"%s\":\"" CONFIG_FORMAT_PING_MIXED "\"}",
-            data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_DELAYED, data->duration_ms_total, data->loss_total);
+            data->state, json_duration, json_loss, CONFIG_SENSOR_DISPLAY, CONFIG_FORMAT_PING_SLOWDOWN, data->duration_ms_total, data->loss_total);
         };
         break;
       default:
