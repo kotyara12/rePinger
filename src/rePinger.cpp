@@ -485,7 +485,7 @@ static void pingerExec(void *args)
   #if (CONFIG_PINGER_FILTER_MODE > 0) && (CONFIG_PINGER_FILTER_SIZE > 0)
   static bool bufReset = true;
   static uint8_t bufIndex = 0;
-  static uint32_t bufDuration[CONFIG_PINGER_FILTER_SIZE];
+  static uint16_t bufDuration[CONFIG_PINGER_FILTER_SIZE];
   #endif // CONFIG_PINGER_FILTER_MODE
 
   pingerParamsRegister();
@@ -608,57 +608,56 @@ static void pingerExec(void *args)
         data.inet.loss_total = data.inet.loss_max;
       };
 
-      // Analyze results and send events
-      if ((data.inet.hosts_available > 0) 
-       && (data.inet.duration_ms_total < _maxUnavailableDuration) 
-       && (data.inet.loss_total < _maxUnavailableLoss)) {
-        pingLastOk = ((data.inet.duration_ms_total < _maxSlowdownDuration) && (data.inet.loss_total < _maxSlowdownLoss));
+      // Remember unfiltered result
+      pingLastOk = ((data.inet.hosts_available > 0) && (data.inet.duration_ms_total < _maxSlowdownDuration) && (data.inet.loss_total < _maxSlowdownLoss));
 
-        // Filter for "smoothing" ping results (0 - disabled, 1 - average, 2 - median)
-        #if (CONFIG_PINGER_FILTER_MODE > 0) && (CONFIG_PINGER_FILTER_SIZE > 0)
-          if (bufReset) {
-            bufReset = false;
-            for (uint8_t i = 0; i < CONFIG_PINGER_FILTER_SIZE; i++) {
-              bufDuration[i] = data.inet.duration_ms_total;
+      // Filter for "smoothing" ping results (0 - disabled, 1 - average, 2 - median)
+      #if (CONFIG_PINGER_FILTER_MODE > 0) && (CONFIG_PINGER_FILTER_SIZE > 0)
+        if (bufReset) {
+          bufReset = false;
+          for (uint8_t i = 0; i < CONFIG_PINGER_FILTER_SIZE; i++) {
+            bufDuration[i] = data.inet.duration_ms_total;
+          };
+        } else {
+          bufDuration[bufIndex] = data.inet.duration_ms_total;
+        };
+
+        #if CONFIG_PINGER_FILTER_MODE == 1
+          // Average
+          uint32_t sumDuration = 0;
+          for (uint16_t i = 0; i < CONFIG_PINGER_FILTER_SIZE; i++) {
+            sumDuration += bufDuration[i];
+          };
+          data.inet.duration_ms_total = (uint16_t)(sumDuration / CONFIG_PINGER_FILTER_SIZE);
+        #elif CONFIG_PINGER_FILTER_MODE == 2
+          // Median
+          if ((bufIndex < CONFIG_PINGER_FILTER_SIZE - 1) && (bufDuration[bufIndex] > bufDuration[bufIndex + 1])) {
+            for (int i = bufIndex; i < CONFIG_PINGER_FILTER_SIZE - 1; i++) {
+              if (bufDuration[i] > bufDuration[i + 1]) {
+                uint16_t buff = bufDuration[i];
+                bufDuration[i] = bufDuration[i + 1];
+                bufDuration[i + 1] = buff;
+              };
             };
           } else {
-            bufDuration[bufIndex] = data.inet.duration_ms_total;
+            if ((bufIndex > 0) && (bufDuration[bufIndex - 1] > bufDuration[bufIndex])) {
+              for (int i = bufIndex; i > 0; i--) {
+                if (bufDuration[i] < bufDuration[i - 1]) {
+                  uint16_t buff = bufDuration[i];
+                  bufDuration[i] = bufDuration[i - 1];
+                  bufDuration[i - 1] = buff;
+                };
+              };
+            };
           };
-
-          #if CONFIG_PINGER_FILTER_MODE == 1
-            // Average
-            uint32_t sumDuration = 0;
-            for (uint8_t i = 0; i < CONFIG_PINGER_FILTER_SIZE; i++) {
-              sumDuration += bufDuration[i];
-            };
-            data.inet.duration_ms_total = sumDuration / CONFIG_PINGER_FILTER_SIZE;
-          #elif CONFIG_PINGER_FILTER_MODE == 2
-            // Median
-            if ((bufIndex < CONFIG_PINGER_FILTER_SIZE - 1) && (bufDuration[bufIndex] > bufDuration[bufIndex + 1])) {
-              for (int i = bufIndex; i < CONFIG_PINGER_FILTER_SIZE - 1; i++) {
-                if (bufDuration[i] > bufDuration[i + 1]) {
-                  uint32_t buff = bufDuration[i];
-                  bufDuration[i] = bufDuration[i + 1];
-                  bufDuration[i + 1] = buff;
-                };
-              };
-            } else {
-              if ((bufIndex > 0) && (bufDuration[bufIndex - 1] > bufDuration[bufIndex])) {
-                for (int i = bufIndex; i > 0; i--) {
-                  if (bufDuration[i] < bufDuration[i - 1]) {
-                    uint32_t buff = bufDuration[i];
-                    bufDuration[i] = bufDuration[i - 1];
-                    bufDuration[i - 1] = buff;
-                  };
-                };
-              };
-            };
-            data.inet.duration_ms_total = bufDuration[CONFIG_PINGER_FILTER_SIZE / 2];
-          #endif // CONFIG_PINGER_FILTER_MODE
-
-          if (++bufIndex >= CONFIG_PINGER_FILTER_SIZE) bufIndex = 0;
+          data.inet.duration_ms_total = bufDuration[CONFIG_PINGER_FILTER_SIZE / 2];
         #endif // CONFIG_PINGER_FILTER_MODE
 
+        if (++bufIndex >= CONFIG_PINGER_FILTER_SIZE) bufIndex = 0;
+      #endif // CONFIG_PINGER_FILTER_MODE
+
+      // Analyze results and send events
+      if ((data.inet.hosts_available > 0) && (data.inet.duration_ms_total < _maxUnavailableDuration) && (data.inet.loss_total < _maxUnavailableLoss)) {
         // Status analysis by total filtered response time
         if ((data.inet.duration_ms_total < _maxSlowdownDuration) && (data.inet.loss_total < _maxSlowdownLoss)) {
           inet_state = PING_OK;
@@ -689,7 +688,7 @@ static void pingerExec(void *args)
         rlog_e(logTAG, "Internet access is not available!");
         if (data.inet.state != inet_state) {
           data.inet.count_unavailable++;
-          if (data.inet.time_unavailable == 0) {
+          if ((data.inet.state <= PING_UNAVAILABLE) || (data.inet.time_unavailable == 0)) {
             data.inet.time_unavailable = time(nullptr);
           };
           if ((data.inet.state == PING_OK) || (data.inet.state == PING_SLOWDOWN)) {

@@ -9,6 +9,8 @@
 #include "reMqtt.h"
 #include "reStates.h"
 
+#if CONFIG_MQTT_PINGER_ENABLE
+
 static const char *logTAG = "PING";
 static char* _mqttTopicPing = nullptr;
 
@@ -448,3 +450,5 @@ bool pingerMqttRegister()
   return eventHandlerRegister(RE_MQTT_EVENTS, RE_MQTT_CONNECTED, &pingerMqttEventHandler, nullptr)
       && eventHandlerRegister(RE_MQTT_EVENTS, RE_MQTT_CONN_LOST, &pingerMqttEventHandler, nullptr);
 };
+
+#endif // CONFIG_MQTT_PINGER_ENABLE

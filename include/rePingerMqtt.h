@@ -13,9 +13,12 @@
 #include "project_config.h"
 #include "def_consts.h"
 
+#if CONFIG_MQTT_PINGER_ENABLE
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 
 char* mqttTopicPingerCreate(const bool primary);
 char* mqttTopicPingerGet();
@@ -28,6 +31,8 @@ bool pingerMqttRegister();
 #ifdef __cplusplus
 }
 #endif
+
+#endif // CONFIG_MQTT_PINGER_ENABLE
 
 #endif // __RE_PINGERMQTT_H__
 
