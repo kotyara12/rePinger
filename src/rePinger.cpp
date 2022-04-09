@@ -81,6 +81,9 @@ StaticTask_t _pingTaskBuffer;
 StackType_t _pingTaskStack[CONFIG_PINGER_TASK_STACK_SIZE];
 #endif // CONFIG_PINGER_TASK_STATIC_ALLOCATION
 
+static uint8_t _pingCount = CONFIG_PINGER_PARAM_COUNT;
+static uint16_t _pingTimeout = CONFIG_PINGER_PARAM_TIMEOUT;
+static uint8_t _pingPacket = CONFIG_PINGER_PARAM_DATASIZE;
 static uint8_t _resultMode = CONFIG_PINGER_TOTAL_RESULT_MODE;
 static uint32_t _maxSlowdownDuration = CONFIG_PINGER_SLOWDOWN_DURATION;
 static float _maxSlowdownLoss = CONFIG_PINGER_SLOWDOWN_LOSS;
@@ -95,6 +98,22 @@ static void pingerParamsRegister()
   paramsGroupHandle_t pgPinger = paramsRegisterGroup(nullptr, 
     CONFIG_PINGER_PGROUP_ROOT_KEY, CONFIG_PINGER_PGROUP_ROOT_TOPIC, CONFIG_PINGER_PGROUP_ROOT_FRIENDLY);
   
+  paramsSetLimitsU8(
+    paramsRegisterValue(OPT_KIND_PARAMETER, OPT_TYPE_U8, nullptr, pgPinger,
+      CONFIG_PINGER_PARAM_COUNT_KEY, CONFIG_PINGER_PARAM_COUNT_FRIENDLY,
+      CONFIG_MQTT_PARAMS_QOS, (void*)&_pingCount),
+    1, 25);
+  paramsSetLimitsU16(
+    paramsRegisterValue(OPT_KIND_PARAMETER, OPT_TYPE_U16, nullptr, pgPinger,
+      CONFIG_PINGER_PARAM_TIMEOUT_KEY, CONFIG_PINGER_PARAM_TIMEOUT_FRIENDLY,
+      CONFIG_MQTT_PARAMS_QOS, (void*)&_pingTimeout),
+    100, 60000);
+  paramsSetLimitsU8(
+    paramsRegisterValue(OPT_KIND_PARAMETER, OPT_TYPE_U8, nullptr, pgPinger,
+      CONFIG_PINGER_PARAM_DATASIZE_KEY, CONFIG_PINGER_PARAM_DATASIZE_FRIENDLY,
+      CONFIG_MQTT_PARAMS_QOS, (void*)&_pingPacket),
+    1, 255);
+
   paramsSetLimitsU8(
     paramsRegisterValue(OPT_KIND_PARAMETER, OPT_TYPE_U8, nullptr, pgPinger,
       CONFIG_PINGER_PARAM_RESULT_MODE_KEY, CONFIG_PINGER_PARAM_RESULT_MODE_FRIENDLY,
@@ -244,7 +263,7 @@ static esp_err_t pingerInitSession(pinger_data_t *ep, const char* hostname, uint
   ep->notify_unavailable = false;
 
   // Allocating memory for a data packet
-  ep->icmp_pkt_size = sizeof(struct icmp_echo_hdr) + CONFIG_PINGER_DATASIZE;
+  ep->icmp_pkt_size = sizeof(struct icmp_echo_hdr) + _pingPacket;
   ep->packet_hdr = (icmp_echo_hdr*)esp_calloc(1, ep->icmp_pkt_size);
   PING_CHECK(ep->packet_hdr, "No memory for echo packet", err, ESP_ERR_NO_MEM);
 
@@ -254,7 +273,7 @@ static esp_err_t pingerInitSession(pinger_data_t *ep, const char* hostname, uint
   // Fill the additional data buffer with some data
   {
     char *d = (char*)ep->packet_hdr + sizeof(struct icmp_echo_hdr);
-    for (uint32_t i = 0; i < CONFIG_PINGER_DATASIZE; i++) {
+    for (uint32_t i = 0; i < _pingPacket; i++) {
       d[i] = 'A' + i;
     };
   }
@@ -308,8 +327,8 @@ static esp_err_t pingerOpenSocket(pinger_data_t *ep)
 
   // Set receive timeout
   struct timeval timeout;
-  timeout.tv_sec = CONFIG_PINGER_TIMEOUT / 1000;
-  timeout.tv_usec = (CONFIG_PINGER_TIMEOUT % 1000) * 1000;
+  timeout.tv_sec = _pingTimeout / 1000;
+  timeout.tv_usec = (_pingTimeout % 1000) * 1000;
   setsockopt(ep->sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
   // Set tos
@@ -384,7 +403,7 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
 
     // Batch of ping operations
     struct timeval timeSend, timeEnd;
-    for (uint32_t i = 0; i < CONFIG_PINGER_COUNT; i++) {
+    for (uint32_t i = 0; i < _pingCount; i++) {
       esp_err_t send_ret = pingerSend(ep);
       gettimeofday(&timeSend, NULL);
       if (send_ret != ESP_OK) {
@@ -395,7 +414,7 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
       gettimeofday(&timeEnd, NULL);
       ep->elapsed_time_ms = PING_TIME_DIFF_MS(timeEnd, timeSend);
       if (ep->elapsed_time_ms > 1000000000) {
-        ep->elapsed_time_ms = rand() % CONFIG_PINGER_TIMEOUT;
+        ep->elapsed_time_ms = rand() % _pingTimeout;
       };
       ep->total_time_ms += ep->elapsed_time_ms;
 
@@ -412,7 +431,7 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
 
     // Calculating loss and average response time
     if (ep->transmitted == 0) {
-      ep->total_duration_ms = CONFIG_PINGER_TIMEOUT;
+      ep->total_duration_ms = _pingTimeout;
       ep->total_loss = 100.0;
       ep->total_state = PING_FAILED;
     } else {
@@ -446,7 +465,7 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
         };
       };
     } else {
-      if (ep->count_unavailable == 0) {
+      if (ep->time_unavailable == 0) {
         ep->time_unavailable = time(nullptr);
       };
       ep->count_unavailable++;
@@ -657,7 +676,7 @@ static void pingerExec(void *args)
       #endif // CONFIG_PINGER_FILTER_MODE
 
       // Analyze results and send events
-      if ((data.inet.hosts_available > 0) && (data.inet.duration_ms_total < _maxUnavailableDuration) && (data.inet.loss_total < _maxUnavailableLoss)) {
+      if ((data.inet.hosts_available > 0) && (data.inet.duration_ms_total < _maxUnavailableDuration) && (data.inet.loss_total <= _maxUnavailableLoss)) {
         // Status analysis by total filtered response time
         if ((data.inet.duration_ms_total < _maxSlowdownDuration) && (data.inet.loss_total < _maxSlowdownLoss)) {
           inet_state = PING_OK;
