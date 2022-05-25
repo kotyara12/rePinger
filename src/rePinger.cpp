@@ -8,6 +8,7 @@
 #include "lwip/init.h"
 #include "lwip/mem.h"
 #include "lwip/icmp.h"
+#include "lwip/dns.h"
 #include "lwip/netif.h"
 #include "lwip/sys.h"
 #include "lwip/timeouts.h"
@@ -241,11 +242,11 @@ static void pingerFreeSession(pinger_data_t *ep)
     if (ep->sock > 0) {
       close(ep->sock);
       ep->sock = 0;
-    }
+    };
     if (ep->packet_hdr) {
       free(ep->packet_hdr);
       ep->packet_hdr = nullptr;
-    }
+    };
   }
 }
 
@@ -266,7 +267,7 @@ static esp_err_t pingerInitSession(pinger_data_t *ep, const char* hostname, uint
   ep->icmp_pkt_size = sizeof(struct icmp_echo_hdr) + _pingPacket;
   ep->packet_hdr = (icmp_echo_hdr*)esp_calloc(1, ep->icmp_pkt_size);
   PING_CHECK(ep->packet_hdr, "No memory for echo packet", err, ESP_ERR_NO_MEM);
-
+  
   // Set ICMP type and code field
   ep->packet_hdr->id = hostid;
   ep->packet_hdr->code = 0;
@@ -296,18 +297,60 @@ static void pingerCloseSocket(pinger_data_t *ep)
   }
 }
 
+#if LWIP_DNS
+static void pingerDnsFound(const char* hostname, const ip_addr_t *ipaddr, void *arg)
+{
+  pinger_data_t *ep = (pinger_data_t *)arg;
+
+  if (ipaddr == nullptr) {
+    ep->host_resolved = 0;
+    ip_addr_set_zero(&ep->host_addr);
+  } else {
+    ep->host_resolved = xTaskGetTickCount();
+    ep->host_addr = *ipaddr;
+  };
+}
+#endif /* LWIP_DNS */ 
+
 static esp_err_t pingerOpenSocket(pinger_data_t *ep)
 {
   esp_err_t ret = ESP_OK;
   PING_CHECK(ep, "Ping data can't be null", err, ESP_ERR_INVALID_ARG);
 
-  // Convert hostname to IP address
-  ret = wifiHostByName(ep->host_name, &ep->host_addr);
+  // Resolve hostname to IP address
+  ep->host_resolved = 0;
+  ip_addr_set_zero(&ep->host_addr);
+  #if LWIP_DNS
+    ret = dns_gethostbyname(ep->host_name, &ep->host_addr, pingerDnsFound, ep);
+  #else
+    ret = ipaddr_aton(ep->host_name, &ep->host_addr) ? ERR_OK : ERR_ARG;
+  #endif // LWIP_DNS
+  if (ret == ERR_INPROGRESS) {
+    uint16_t waitTicks = pdMS_TO_TICKS(5000);
+    while ((waitTicks > 0) && (ep->host_resolved == 0)) {
+      vTaskDelay(1);
+      waitTicks--;
+    };
+    if (ep->host_resolved == 0) {
+      rlog_e(logTAG, "Failed to resolve a hostname [ %s ]: DNS TIMEOUT");
+      return ESP_ERR_NOT_FOUND;
+    } else {
+      ret = ESP_OK;
+    };
+  };
   if (ret == ESP_OK) {
-    ep->host_resolved = xTaskGetTickCount();
+    // todo: Log for IPv6 
+    if (IP_IS_V4(&ep->host_addr)) {
+      rlog_d(logTAG, "IP address obtained for hostname [ %s ]: %d.%d.%d.%d", 
+        ep->host_name, 
+        ip4_addr1(&ep->host_addr.u_addr.ip4),
+        ip4_addr2(&ep->host_addr.u_addr.ip4),
+        ip4_addr3(&ep->host_addr.u_addr.ip4),
+        ip4_addr4(&ep->host_addr.u_addr.ip4));
+    };
   } else {
-    ep->host_resolved = 0;
-    return ret;
+    rlog_e(logTAG, "Failed to resolve a hostname [ %s ]: %d %s", ret, esp_err_to_name(ret));
+    return ESP_ERR_NOT_FOUND;
   };
 
   // Create socket
@@ -370,7 +413,7 @@ static void pingerCopyHostData(pinger_data_t *ep, ping_host_data_t* host_data)
 }
 
 
-static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_availavble, re_ping_event_id_t evid_unavailavble)
+static ping_state_t pingerCheckHostEx(pinger_data_t *ep)
 {
   #if CONFIG_PING_SHOW_INTERMEDIATE
   rlog_d(logTAG, "Ping host [ %s ]...", ep->host_name);
@@ -385,103 +428,106 @@ static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_a
 
   // Opening a socket
   if (ep->sock <= 0) {
-    if (pingerOpenSocket(ep) != ESP_OK) {
-      ep->total_state = PING_FAILED;
-      goto err;
-    };
+    if (pingerOpenSocket(ep) != ESP_OK) goto err;
+    if (ep->sock <= 0) goto err;
   };
 
-  // Sending a series of ICMP packets
-  if (ep->sock > 0) {
-    // Initialize runtime statistics
-    ep->packet_hdr->seqno = 0;
-    ep->transmitted = 0;
-    ep->received = 0;
-    ep->total_time_ms = 0;
-    ep->total_duration_ms = 0;
-    ep->total_loss = 0;
+  // Initialize runtime statistics
+  ep->packet_hdr->seqno = 0;
+  ep->transmitted = 0;
+  ep->received = 0;
+  ep->total_time_ms = 0;
+  ep->total_duration_ms = 0;
+  ep->total_loss = 0;
 
-    // Batch of ping operations
-    struct timeval timeSend, timeEnd;
-    for (uint32_t i = 0; i < _pingCount; i++) {
-      esp_err_t send_ret = pingerSend(ep);
-      gettimeofday(&timeSend, NULL);
-      if (send_ret != ESP_OK) {
-        ep->total_state = PING_FAILED;
-        goto err;
-      };
-      int recv_ret = pingerReceive(ep);
-      gettimeofday(&timeEnd, NULL);
-      ep->elapsed_time_ms = PING_TIME_DIFF_MS(timeEnd, timeSend);
-      if (ep->elapsed_time_ms > 1000000000) {
-        ep->elapsed_time_ms = rand() % _pingTimeout;
-      };
-      ep->total_time_ms += ep->elapsed_time_ms;
+  // Batch of ping operations
+  struct timeval timeSend, timeEnd;
+  for (uint32_t i = 0; i < _pingCount; i++) {
+    // Send packet
+    esp_err_t send_ret = pingerSend(ep);
+    gettimeofday(&timeSend, NULL);
+    if (send_ret != ESP_OK) goto err;
 
-      #if CONFIG_PING_SHOW_INTERMEDIATE
-      if (recv_ret >= 0) {
-        rlog_d(logTAG, "Received of %d bytes from [%s : %s]: icmp_seq = %d, ttl = %d, time = %d ms",
-          ep->datasize, ep->host_name, ipaddr_ntoa(&ep->host_addr), ep->packet_hdr->seqno, ep->ttl, ep->elapsed_time_ms);
-      } else {
-        rlog_w(logTAG, "Packet loss for [%s : %s]: icmp_seq = %d", 
-          ep->host_name, ipaddr_ntoa(&ep->host_addr), ep->packet_hdr->seqno);
-      };
-      #endif // CONFIG_PING_SHOW_INTERMEDIATE
+    // Recieve response
+    int recv_ret = pingerReceive(ep);
+    gettimeofday(&timeEnd, NULL);
+    ep->elapsed_time_ms = PING_TIME_DIFF_MS(timeEnd, timeSend);
+    if (ep->elapsed_time_ms > 1000000000) {
+      ep->elapsed_time_ms = rand() % _pingTimeout;
     };
+    ep->total_time_ms += ep->elapsed_time_ms;
 
-    // Calculating loss and average response time
-    if (ep->transmitted == 0) {
-      ep->total_duration_ms = _pingTimeout;
-      ep->total_loss = 100.0;
-      ep->total_state = PING_FAILED;
+    #if CONFIG_PING_SHOW_INTERMEDIATE
+    if (recv_ret >= 0) {
+      rlog_d(logTAG, "Received of %d bytes from [%s : %s]: icmp_seq = %d, ttl = %d, time = %d ms",
+        ep->datasize, ep->host_name, ipaddr_ntoa(&ep->host_addr), ep->packet_hdr->seqno, ep->ttl, ep->elapsed_time_ms);
     } else {
-      ep->total_duration_ms = ep->total_time_ms / ep->transmitted;
-      ep->total_loss = (float)((1 - ((float)ep->received) / ep->transmitted) * 100);
-      if (ep->received == 0) {
-        ep->total_state = PING_UNAVAILABLE;
-      } else {
-        ep->total_state = PING_OK;
-      };
+      rlog_w(logTAG, "Packet loss for [%s : %s]: icmp_seq = %d", 
+        ep->host_name, ipaddr_ntoa(&ep->host_addr), ep->packet_hdr->seqno);
     };
-
-    // Show log
-    rlog_d(logTAG, "Ping statistics for [%s : %s]: %d packets transmitted, %d received, %.1f% % packet loss, average time %d ms",
-      ep->host_name, ipaddr_ntoa(&ep->host_addr), ep->transmitted, ep->received, ep->total_loss, ep->total_duration_ms);
-
-    // Copy results to data to send to event loop
-    ping_host_data_t host_data;
-    pingerCopyHostData(ep, &host_data);
-    
-    // Post event
-    if (ep->total_state == PING_OK) {
-      if (ep->notify_unavailable || (ep->count_unavailable > 0)) {
-        rlog_i(logTAG, "Host [ %s ] is available", ep->host_name);
-        host_data.time_unavailable = ep->time_unavailable;
-        ep->count_unavailable = 0;
-        ep->time_unavailable = 0;
-        if (ep->notify_unavailable) {
-          ep->notify_unavailable = false;
-          eventLoopPost(RE_PING_EVENTS, evid_availavble, &host_data, sizeof(host_data), portMAX_DELAY);
-        };
-      };
-    } else {
-      if (ep->time_unavailable == 0) {
-        ep->time_unavailable = time(nullptr);
-      };
-      ep->count_unavailable++;
-      rlog_w(logTAG, "Host [ %s ] is not available (count=%d)", ep->host_name, ep->count_unavailable);
-      if ((!ep->notify_unavailable) && (ep->count_unavailable >= ep->limit_unavailable)) {
-        ep->notify_unavailable = true;
-        host_data.time_unavailable = ep->time_unavailable;
-        eventLoopPost(RE_PING_EVENTS, evid_unavailavble, &host_data, sizeof(host_data), portMAX_DELAY);
-      };
-    };
-    
-    // Returning the batch result
-    return ep->total_state;
+    #endif // CONFIG_PING_SHOW_INTERMEDIATE
   };
+
+  // Calculating loss and average response time
+  if (ep->transmitted > 0) {
+    ep->total_duration_ms = ep->total_time_ms / ep->transmitted;
+    ep->total_loss = (float)((1 - ((float)ep->received) / ep->transmitted) * 100);
+    if (ep->received == 0) {
+      ep->total_state = PING_UNAVAILABLE;
+    } else {
+      ep->total_state = PING_OK;
+    };
+  } else goto err;
+
+  // Returning the batch result
+  return ep->total_state;
 err:
+  ep->total_duration_ms = _pingTimeout;
+  ep->total_loss = 100.0;
+  ep->total_state = PING_FAILED;
   pingerCloseSocket(ep);
+  return ep->total_state;
+}
+
+
+static ping_state_t pingerCheckHost(pinger_data_t *ep, re_ping_event_id_t evid_availavble, re_ping_event_id_t evid_unavailavble)
+{
+  // Ping host
+  pingerCheckHostEx(ep);
+
+  // Show log
+  rlog_d(logTAG, "Ping statistics for [%s : %s]: %d packets transmitted, %d received, %.1f% % packet loss, average time %d ms",
+    ep->host_name, ipaddr_ntoa(&ep->host_addr), ep->transmitted, ep->received, ep->total_loss, ep->total_duration_ms);
+
+  // Copy results to data to send to event loop
+  ping_host_data_t host_data;
+  pingerCopyHostData(ep, &host_data);
+  
+  // Post event
+  if (ep->total_state == PING_OK) {
+    if (ep->notify_unavailable || (ep->count_unavailable > 0)) {
+      rlog_i(logTAG, "Host [ %s ] is available", ep->host_name);
+      host_data.time_unavailable = ep->time_unavailable;
+      ep->count_unavailable = 0;
+      ep->time_unavailable = 0;
+      if (ep->notify_unavailable) {
+        ep->notify_unavailable = false;
+        eventLoopPost(RE_PING_EVENTS, evid_availavble, &host_data, sizeof(host_data), portMAX_DELAY);
+      };
+    };
+  } else {
+    if (ep->time_unavailable == 0) {
+      ep->time_unavailable = time(nullptr);
+    };
+    ep->count_unavailable++;
+    rlog_w(logTAG, "Host [ %s ] is not available (count=%d)", ep->host_name, ep->count_unavailable);
+    if ((!ep->notify_unavailable) && (ep->count_unavailable >= ep->limit_unavailable)) {
+      ep->notify_unavailable = true;
+      host_data.time_unavailable = ep->time_unavailable;
+      eventLoopPost(RE_PING_EVENTS, evid_unavailavble, &host_data, sizeof(host_data), portMAX_DELAY);
+    };
+  };
+  
   return ep->total_state;
 }
 
@@ -521,11 +567,6 @@ static void pingerExec(void *args)
     static pinger_data_t pdHost3;
     if (pingerInitSession(&pdHost3, CONFIG_PINGER_HOST_3, 7003, 1) == ESP_OK) { data.inet.hosts_count++; };
   #endif // CONFIG_PINGER_HOST_3
-
-  #if CONFIG_TELEGRAM_ENABLE & defined(CONFIG_TELEGRAM_HOST_CHECK)
-    static pinger_data_t pdTelegram;
-    pingerInitSession(&pdTelegram, CONFIG_TELEGRAM_HOST_CHECK, 8010, CONFIG_TELEGRAM_HOST_CHECK_LIMIT);
-  #endif // CONFIG_TELEGRAM_ENABLE && defined(CONFIG_TELEGRAM_HOST_CHECK)
 
   #if CONFIG_MQTT1_PING_CHECK
     static pinger_data_t pdMqtt1;
@@ -731,10 +772,6 @@ static void pingerExec(void *args)
 
       // Additional checks for individual hosts
       if (pingLastOk) {
-        #if CONFIG_TELEGRAM_ENABLE & defined(CONFIG_TELEGRAM_HOST_CHECK)
-        pingerCheckHost(&pdTelegram, RE_PING_TG_API_AVAILABLE, RE_PING_TG_API_UNAVAILABLE);
-        #endif // CONFIG_TELEGRAM_ENABLE && defined(CONFIG_TELEGRAM_HOST_CHECK)
-        
         #if CONFIG_MQTT1_PING_CHECK
         pingerCheckHost(&pdMqtt1, RE_PING_MQTT1_AVAILABLE, RE_PING_MQTT1_UNAVAILABLE);
         #endif // CONFIG_MQTT1_PING_CHECK
@@ -766,10 +803,6 @@ static void pingerExec(void *args)
   pingerFreeSession(&pdHost3);
   #endif // CONFIG_PINGER_HOST_3
 
-  #if CONFIG_TELEGRAM_ENABLE & defined(CONFIG_TELEGRAM_HOST_CHECK)
-  pingerFreeSession(&pdTelegram);
-  #endif // CONFIG_TELEGRAM_ENABLE && defined(CONFIG_TELEGRAM_HOST_CHECK)
-
   #if CONFIG_MQTT1_PING_CHECK
   pingerFreeSession(&pdMqtt1);
   #endif // CONFIG_MQTT1_PING_CHECK
@@ -789,15 +822,15 @@ bool pingerTaskCreate(bool createSuspended)
 {
   if (!_pingTask) {
     #if CONFIG_PINGER_TASK_STATIC_ALLOCATION
-    _pingTask = xTaskCreateStaticPinnedToCore(pingerExec, pingerTaskName, 
-      CONFIG_PINGER_TASK_STACK_SIZE, NULL, CONFIG_PINGER_TASK_PRIORITY, 
-      _pingTaskStack, &_pingTaskBuffer, 
-      CONFIG_PINGER_TASK_CORE); 
+      _pingTask = xTaskCreateStaticPinnedToCore(pingerExec, pingerTaskName, 
+        CONFIG_PINGER_TASK_STACK_SIZE, NULL, CONFIG_PINGER_TASK_PRIORITY, 
+        _pingTaskStack, &_pingTaskBuffer, 
+        CONFIG_PINGER_TASK_CORE); 
     #else
-    xTaskCreatePinnedToCore(pingerExec, pingerTaskName, 
-      CONFIG_PINGER_TASK_STACK_SIZE, NULL, CONFIG_PINGER_TASK_PRIORITY, 
-      &_pingTask, 
-      CONFIG_PINGER_TASK_CORE); 
+      xTaskCreatePinnedToCore(pingerExec, pingerTaskName, 
+        CONFIG_PINGER_TASK_STACK_SIZE, NULL, CONFIG_PINGER_TASK_PRIORITY, 
+        &_pingTask, 
+        CONFIG_PINGER_TASK_CORE); 
     #endif // CONFIG_PINGER_TASK_STATIC_ALLOCATION
     if (_pingTask) {
       if (createSuspended) {
