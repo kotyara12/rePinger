@@ -1,0 +1,17 @@
+{
+  "name": "rePinger",
+  "version": "2.4.0",
+  "description": "Service for periodically checking the availability of the Internet on one or several public servers",
+  "keywords": "ping",
+  "authors":
+  [
+    {
+      "name": "Alexander Razzhivin",
+      "email": "kotyara12@yandex.ru",
+      "url": "https://kotyara12.ru"
+    }
+  ],
+  "license": "MIT",
+  "frameworks": ["espidf"],
+  "platforms": ["espressif32"]
+}

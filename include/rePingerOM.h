@@ -9,9 +9,14 @@
 #ifndef __RE_PINGEROM_H__
 #define __RE_PINGEROM_H__
 
-#include "reEvents.h"
+#include <stdlib.h>
+#include <stdbool.h>
 #include "project_config.h"
 #include "def_consts.h"
+#include "rLog.h"
+#include "rStrings.h"
+#include "reEvents.h"
+#include "reDataSend.h"
 
 #ifdef __cplusplus
 extern "C" {

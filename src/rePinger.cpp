@@ -195,16 +195,16 @@ static int pingerReceive(pinger_data_t *ep)
       inet_addr_to_ip4addr(ip_2_ip4(&ep->host_addr), &from4->sin_addr);
       IP_SET_TYPE_VAL(ep->host_addr, IPADDR_TYPE_V4);
       data_head = (uint16_t)(sizeof(struct ip_hdr) + sizeof(struct icmp_echo_hdr));
-    }
     #if CONFIG_LWIP_IPV6
-    else {
+    } else {
       // IPv6
       struct sockaddr_in6 *from6 = (struct sockaddr_in6 *)&from;
       inet6_addr_to_ip6addr(ip_2_ip6(&ep->host_addr), &from6->sin6_addr);
       IP_SET_TYPE_VAL(ep->host_addr, IPADDR_TYPE_V6);
       data_head = (uint16_t)(sizeof(struct ip6_hdr) + sizeof(struct icmp6_echo_hdr));
-    }
     #endif // CONFIG_LWIP_IPV6
+    };
+
     if (len >= data_head) {
       if (IP_IS_V4_VAL(ep->host_addr)) {              
         // Currently we process IPv4
@@ -216,9 +216,8 @@ static int pingerReceive(pinger_data_t *ep)
           // ep->recv_len = lwip_ntohs(IPH_LEN(iphdr)) - data_head;  // The data portion of ICMP
           return len;
         }
-      }
       #if CONFIG_LWIP_IPV6
-      else if (IP_IS_V6_VAL(ep->host_addr)) {      
+      } else if (IP_IS_V6_VAL(ep->host_addr)) {      
         // Currently we process IPv6
         struct ip6_hdr *iphdr = (struct ip6_hdr *)buf;
         struct icmp6_echo_hdr *iecho6 = (struct icmp6_echo_hdr *)(buf + sizeof(struct ip6_hdr)); // IPv6 head length is 40
@@ -227,9 +226,10 @@ static int pingerReceive(pinger_data_t *ep)
           // ep->recv_len = IP6H_PLEN(iphdr) - sizeof(struct icmp6_echo_hdr); // The data portion of ICMPv6
           return len;
         }
-      }
       #endif // CONFIG_LWIP_IPV6
-    }
+      };
+    };
+
     fromlen = sizeof(from);
   }
   // if timeout, len will be -1
@@ -339,33 +339,40 @@ static esp_err_t pingerOpenSocket(pinger_data_t *ep)
     };
   };
   if (ret == ESP_OK) {
-    // todo: Log for IPv6 
-    if (IP_IS_V4(&ep->host_addr)) {
+    #if CONFIG_LWIP_IPV6
+      // todo: IPV6 log support
+      if (IP_IS_V4(&ep->host_addr)) {
+        rlog_d(logTAG, "IP address obtained for hostname [ %s ]: %d.%d.%d.%d", 
+          ep->host_name, 
+          ip4_addr1(&ep->host_addr.u_addr.ip4),
+          ip4_addr2(&ep->host_addr.u_addr.ip4),
+          ip4_addr3(&ep->host_addr.u_addr.ip4),
+          ip4_addr4(&ep->host_addr.u_addr.ip4));
+      };
+    #else
       rlog_d(logTAG, "IP address obtained for hostname [ %s ]: %d.%d.%d.%d", 
         ep->host_name, 
-        ip4_addr1(&ep->host_addr.u_addr.ip4),
-        ip4_addr2(&ep->host_addr.u_addr.ip4),
-        ip4_addr3(&ep->host_addr.u_addr.ip4),
-        ip4_addr4(&ep->host_addr.u_addr.ip4));
-    };
+        ip4_addr1(&ep->host_addr),
+        ip4_addr2(&ep->host_addr),
+        ip4_addr3(&ep->host_addr),
+        ip4_addr4(&ep->host_addr));
+    #endif // CONFIG_LWIP_IPV6
   } else {
-    rlog_e(logTAG, "Failed to resolve a hostname [ %s ]: %d %s", ret, esp_err_to_name(ret));
+    rlog_e(logTAG, "Failed to resolve a hostname [ %s ]: %d %s", ep->host_name, ret, esp_err_to_name(ret));
     return ESP_ERR_NOT_FOUND;
   };
 
   // Create socket
-  if (IP_IS_V4(&ep->host_addr)
-    #if CONFIG_LWIP_IPV6
-    || ip6_addr_isipv4mappedipv6(ip_2_ip6(&ep->host_addr))
-    #endif
-    ) {
-    ep->sock = socket(AF_INET, SOCK_RAW, IP_PROTO_ICMP);
-  }
   #if CONFIG_LWIP_IPV6
-  else {
-    ep->sock = socket(AF_INET6, SOCK_RAW, IP6_NEXTH_ICMP6);
-  };
-  #endif
+    if (IP_IS_V4(&ep->host_addr) || ip6_addr_isipv4mappedipv6(ip_2_ip6(&ep->host_addr))) {
+      ep->sock = socket(AF_INET, SOCK_RAW, IP_PROTO_ICMP);
+    } else {
+      ep->sock = socket(AF_INET6, SOCK_RAW, IP6_NEXTH_ICMP6);
+    };
+  #else
+    ep->sock = socket(AF_INET, SOCK_RAW, IP_PROTO_ICMP);
+  #endif // CONFIG_LWIP_IPV6
+
   PING_CHECK(ep->sock > 0, "Create socket failed: %d", err, ESP_FAIL, ep->sock);
 
   // Set receive timeout
@@ -383,14 +390,14 @@ static esp_err_t pingerOpenSocket(pinger_data_t *ep)
     to4->sin_family = AF_INET;
     inet_addr_from_ip4addr(&to4->sin_addr, ip_2_ip4(&ep->host_addr));
     ep->packet_hdr->type = ICMP_ECHO;
-  }
+  };
   #if CONFIG_LWIP_IPV6
-  if (IP_IS_V6(&ep->host_addr)) {
-    struct sockaddr_in6 *to6 = (struct sockaddr_in6 *)&ep->target_addr;
-    to6->sin6_family = AF_INET6;
-    inet6_addr_from_ip6addr(&to6->sin6_addr, ip_2_ip6(&ep->host_addr));
-    ep->packet_hdr->type = ICMP6_TYPE_EREQ;
-  }
+    if (IP_IS_V6(&ep->host_addr)) {
+      struct sockaddr_in6 *to6 = (struct sockaddr_in6 *)&ep->target_addr;
+      to6->sin6_family = AF_INET6;
+      inet6_addr_from_ip6addr(&to6->sin6_addr, ip_2_ip6(&ep->host_addr));
+      ep->packet_hdr->type = ICMP6_TYPE_EREQ;
+    };
   #endif // CONFIG_LWIP_IPV6
   return ESP_OK;
 err:
@@ -411,7 +418,6 @@ static void pingerCopyHostData(pinger_data_t *ep, ping_host_data_t* host_data)
   host_data->ttl = ep->ttl;
   host_data->state = ep->total_state;
 }
-
 
 static ping_state_t pingerCheckHostEx(pinger_data_t *ep)
 {
@@ -823,14 +829,14 @@ bool pingerTaskCreate(bool createSuspended)
   if (!_pingTask) {
     #if CONFIG_PINGER_TASK_STATIC_ALLOCATION
       _pingTask = xTaskCreateStaticPinnedToCore(pingerExec, pingerTaskName, 
-        CONFIG_PINGER_TASK_STACK_SIZE, NULL, CONFIG_PINGER_TASK_PRIORITY, 
+        CONFIG_PINGER_TASK_STACK_SIZE, NULL, CONFIG_TASK_PRIORITY_PINGER, 
         _pingTaskStack, &_pingTaskBuffer, 
-        CONFIG_PINGER_TASK_CORE); 
+        CONFIG_TASK_CORE_PINGER); 
     #else
       xTaskCreatePinnedToCore(pingerExec, pingerTaskName, 
-        CONFIG_PINGER_TASK_STACK_SIZE, NULL, CONFIG_PINGER_TASK_PRIORITY, 
+        CONFIG_PINGER_TASK_STACK_SIZE, NULL, CONFIG_TASK_PRIORITY_PINGER, 
         &_pingTask, 
-        CONFIG_PINGER_TASK_CORE); 
+        CONFIG_TASK_CORE_PINGER); 
     #endif // CONFIG_PINGER_TASK_STATIC_ALLOCATION
     if (_pingTask) {
       if (createSuspended) {
@@ -844,7 +850,7 @@ bool pingerTaskCreate(bool createSuspended)
     }
     else {
       rloga_e("Failed to create task for Internet checking!");
-      eventLoopPostSystem(RE_SYS_ERROR, RE_SYS_SET);
+      eventLoopPostError(RE_SYS_ERROR, ESP_FAIL);
       return false;
     };
   };
@@ -929,6 +935,7 @@ static void pingerOtaEventHandler(void* arg, esp_event_base_t event_base, int32_
 
 bool pingerEventHandlerRegister()
 {
+  rlog_d(logTAG, "Register pinger event handlers...");
   bool ret = eventHandlerRegister(RE_WIFI_EVENTS, ESP_EVENT_ANY_ID, &pingerWifiEventHandler, nullptr);
   ret = ret && eventHandlerRegister(RE_SYSTEM_EVENTS, RE_SYS_OTA, &pingerOtaEventHandler, nullptr);
   #if CONFIG_MQTT_PINGER_ENABLE
