@@ -1,5 +1,6 @@
 #include "project_config.h"
 #include "def_consts.h"
+#include "stdint.h"
 #if CONFIG_OPENMON_PINGER_RSSI
 #include "reWiFi.h"
 #endif // CONFIG_OPENMON_PINGER_RSSI
@@ -15,180 +16,82 @@ void pingerOpenMonInit()
 
 void pingerOpenMonPublish(ping_publish_data_t* data)
 {
+  uint8_t omIndex = 1;
+  char* omValues = nullptr;
+
+  // Append RSSI
   #if CONFIG_OPENMON_PINGER_RSSI
-  wifi_ap_record_t wifi_info = wifiInfo();
+    {
+      wifi_ap_record_t wifi_info = wifiInfo();
+      omValues = concat_strings_div(omValues, 
+        malloc_stringf("p%d=%d", 
+          omIndex, wifi_info.rssi),
+        "&");
+      omIndex++;
+    }
   #endif // CONFIG_OPENMON_PINGER_RSSI
 
+  // Append free HEAP
   #if CONFIG_OPENMON_PINGER_HEAP_FREE
-  double heap_total = (double)heap_caps_get_total_size(MALLOC_CAP_DEFAULT) / 1024.0;
-  double heap_free  = (double)heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0;
+    {
+      double heap_total = (double)heap_caps_get_total_size(MALLOC_CAP_DEFAULT) / 1024.0;
+      double heap_free = (double)heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0;
+      omValues = concat_strings_div(omValues, 
+        malloc_stringf("p%d=%f&p%d=%f", 
+          omIndex, heap_free, 
+          omIndex+1, 100.0*heap_free/heap_total),
+        "&");
+      omIndex = omIndex+2;
+    }
   #endif // CONFIG_OPENMON_PINGER_HEAP_FREE
 
-  if (data->inet.state < PING_UNAVAILABLE) {
-    #if CONFIG_OPENMON_PINGER_RSSI
-      #if CONFIG_OPENMON_PINGER_HEAP_FREE
-        #if CONFIG_OPENMON_PINGER_HOSTS
-          
-          // RSSI + HEAP + HOSTS + INET
+  // Append hosts
+  #if CONFIG_OPENMON_PINGER_HOSTS
+    #ifdef CONFIG_PINGER_HOST_1
+      omValues = concat_strings_div(omValues, 
+        malloc_stringf("p%d=%d&p%d=%d&p%d=%f", 
+          omIndex, data->host1.state, 
+          omIndex+1, data->host1.duration_ms, 
+          omIndex+2, data->host1.loss),
+        "&");
+      omIndex = omIndex+3;
+    #endif // CONFIG_PINGER_HOST_1
+    #ifdef CONFIG_PINGER_HOST_2
+      omValues = concat_strings_div(omValues, 
+        malloc_stringf("p%d=%d&p%d=%d&p%d=%f", 
+          omIndex, data->host2.state, 
+          omIndex+1, data->host2.duration_ms, 
+          omIndex+2, data->host2.loss),
+        "&");
+      omIndex = omIndex+3;
+    #endif // CONFIG_PINGER_HOST_2
+    #ifdef CONFIG_PINGER_HOST_3
+      omValues = concat_strings_div(omValues, 
+        malloc_stringf("p%d=%d&p%d=%d&p%d=%f", 
+          omIndex, data->host3.state, 
+          omIndex+1, data->host3.duration_ms, 
+          omIndex+2, data->host3.loss),
+        "&");
+      omIndex = omIndex+3;
+    #endif // CONFIG_PINGER_HOST_3
+  #endif // CONFIG_OPENMON_PINGER_HOSTS
 
-          #ifdef CONFIG_PINGER_HOST_2
-            #ifdef CONFIG_PINGER_HOST_3
-              dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-                malloc_stringf("p1=%d&p2=%f&p3=%f&p4=%d&p5=%d&p6=%f&p7=%d&p8=%d&p9=%f&p10=%d&p11=%d&p12=%f&p13=%d&p14=%d&p15=%d&p16=%d&p17=%f&p18=%f&p19=%f",
-                  wifi_info.rssi,
-                  heap_free, 100.0*heap_free/heap_total,
-                  data->host1.state, data->host1.duration_ms, data->host1.loss,
-                  data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->host3.state, data->host3.duration_ms, data->host3.loss,
-                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-            #else
-              dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-                malloc_stringf("p1=%d&p2=%f&p3=%f&p4=%d&p5=%d&p6=%f&p7=%d&p8=%d&p9=%f&p10=%d&p11=%d&p12=%d&p13=%d&p14=%f&p15=%f&p16=%f",
-                  wifi_info.rssi,
-                  heap_free, 100.0*heap_free/heap_total,
-                  data->host1.state, data->host1.duration_ms, data->host1.loss,
-                  data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-            #endif // CONFIG_PINGER_HOST_3
-          #else
-            dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-              malloc_stringf("p1=%d&p2=%f&p3=%f&p4=%d&p5=%d&p6=%f&p7=%d&p8=%d&p9=%d&p10=%d&p11=%f&p12=%f&p13=%f",
-                wifi_info.rssi,
-                heap_free, 100.0*heap_free/heap_total,
-                data->host1.state, data->host1.duration_ms, data->host1.loss,
-                data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-          #endif // CONFIG_PINGER_HOST_2
-
-        #else
-
-          // RSSI + HEAP + INET
-
-          dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-            malloc_stringf("p1=%d&p2=%f&p3=%f&p4=%d&p5=%d&p6=%d&p7=%d&p8=%f&p9=%f&p10=%f",
-              wifi_info.rssi,
-              heap_free, 100.0*heap_free/heap_total,
-              data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-
-        #endif // CONFIG_OPENMON_PINGER_HOSTS
-      #else
-        #if CONFIG_OPENMON_PINGER_HOSTS
-
-          // RSSI + HOSTS + INET
-        
-          #ifdef CONFIG_PINGER_HOST_2
-            #ifdef CONFIG_PINGER_HOST_3
-              dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-                malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%f&p5=%d&p6=%d&p7=%f&p8=%d&p9=%d&p10=%f&p11=%d&p12=%d&p13=%d&p14=%d&p15=%f&p16=%f&p17=%f",
-                  wifi_info.rssi,
-                  data->host1.state, data->host1.duration_ms, data->host1.loss,
-                  data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->host3.state, data->host3.duration_ms, data->host3.loss,
-                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-            #else
-              dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-                malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%f&p5=%d&p6=%d&p7=%f&p8=%d&p9=%d&p10=%d&p11=%d&p12=%f&p13=%f&p14=%f",
-                  wifi_info.rssi,
-                  data->host1.state, data->host1.duration_ms, data->host1.loss,
-                  data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-            #endif // CONFIG_PINGER_HOST_3
-          #else
-            dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-              malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%f&p5=%d&p6=%d&p7=%d&p8=%d&p9=%f&p10=%f&p11=%f",
-                wifi_info.rssi,
-                data->host1.state, data->host1.duration_ms, data->host1.loss,
-                data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-          #endif // CONFIG_PINGER_HOST_2
-        
-        #else
-        
-          // RSSI + INET
-        
-          dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-            malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%d&p5=%d&p6=%f&p7=%f&p8=%f",
-              wifi_info.rssi,
-              data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-
-        #endif // CONFIG_OPENMON_PINGER_HOSTS
-      #endif // CONFIG_OPENMON_PINGER_HEAP_FREE
-    #else
-      #if CONFIG_OPENMON_PINGER_HEAP_FREE
-        #if CONFIG_OPENMON_PINGER_HOSTS
-
-          // HEAP + HOSTS + INET
-        
-          #ifdef CONFIG_PINGER_HOST_2
-            #ifdef CONFIG_PINGER_HOST_3
-              dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-                malloc_stringf("p1=%f&p2=%f&p3=%d&p4=%d&p5=%f&p6=%d&p7=%d&p8=%f&p9=%d&p10=%d&p11=%f&p12=%d&p13=%d&p14=%d&p15=%d&p16=%f&p17=%f&p18=%f",
-                  heap_free, 100.0*heap_free/heap_total,
-                  data->host1.state, data->host1.duration_ms, data->host1.loss,
-                  data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->host3.state, data->host3.duration_ms, data->host3.loss,
-                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-            #else
-              dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-                malloc_stringf("p1=%f&p2=%f&p3=%d&p4=%d&p5=%f&p6=%d&p7=%d&p8=%f&p9=%d&p10=%d&p11=%d&p12=%d&p13=%f&p14=%f&p15=%f",
-                  heap_free, 100.0*heap_free/heap_total,
-                  data->host1.state, data->host1.duration_ms, data->host1.loss,
-                  data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-            #endif // CONFIG_PINGER_HOST_3
-          #else
-            dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-              malloc_stringf("p1=%f&p2=%f&p3=%d&p4=%d&p5=%f&p6=%d&p7=%d&p8=%d&p9=%d&p10=%f&p11=%f&p12=%f",
-                heap_free, 100.0*heap_free/heap_total,
-                data->host1.state, data->host1.duration_ms, data->host1.loss,
-                data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-          #endif // CONFIG_PINGER_HOST_2
-
-        #else
-          
-          // HEAP + INET
-          
-          dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-            malloc_stringf("p1=%f&p2=%f&p3=%d&p4=%d&p5=%d&p6=%d&p7=%f&p8=%f&p9=%f",
-              heap_free, 100.0*heap_free/heap_total,
-              data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-
-        #endif // CONFIG_OPENMON_PINGER_HOSTS
-      #else
-        #if CONFIG_OPENMON_PINGER_HOSTS
-
-          // HOSTS + INET
-
-          #ifdef CONFIG_PINGER_HOST_2
-            #ifdef CONFIG_PINGER_HOST_3
-              dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-                malloc_stringf("p1=%d&p2=%d&p3=%f&p4=%d&p5=%d&p6=%f&p7=%d&p8=%d&p9=%f&p10=%d&p11=%d&p12=%d&p13=%d&p14=%f&p15=%f&p16=%f",
-                  data->host1.state, data->host1.duration_ms, data->host1.loss,
-                  data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->host3.state, data->host3.duration_ms, data->host3.loss,
-                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-            #else
-              dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-                malloc_stringf("p1=%d&p2=%d&p3=%f&p4=%d&p5=%d&p6=%f&p7=%d&p8=%d&p9=%d&p10=%d&p11=%f&p12=%f&p13=%f",
-                  data->host1.state, data->host1.duration_ms, data->host1.loss,
-                  data->host2.state, data->host2.duration_ms, data->host2.loss,
-                  data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-            #endif // CONFIG_PINGER_HOST_3
-          #else
-            dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, 
-              malloc_stringf("p1=%d&p2=%d&p3=%f&p4=%d&p5=%d&p6=%d&p7=%d&p8=%f&p9=%f&p10=%f",
-                data->host1.state, data->host1.duration_ms, data->host1.loss,
-                data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-          #endif // CONFIG_PINGER_HOST_2
-        #else
-
-          // INET
-
-          dsSend(EDS_OPENMON, ONFIG_OPENMON_PINGER_ID, 
-            malloc_stringf("p1=%d&p2=%d&p3=%d&p4=%d&p5=%f&p6=%f&p7=%f",
-              data->inet.state, data->inet.duration_ms_total, data->inet.duration_ms_min, data->inet.duration_ms_max, data->inet.loss_total, data->inet.loss_min, data->inet.loss_max));
-
-        #endif // CONFIG_OPENMON_PINGER_HOSTS
-      #endif // CONFIG_OPENMON_PINGER_HEAP_FREE
-    #endif // CONFIG_OPENMON_PINGER_RSSI
+  // Append internet ping
+  omValues = concat_strings_div(omValues, 
+    malloc_stringf("p%d=%d&p%d=%d&p%d=%d&p%d=%d&p%d=%f&p%d=%f&p%d=%f", 
+      omIndex, data->inet.state, 
+      omIndex+1, data->inet.duration_ms_total, 
+      omIndex+2, data->inet.duration_ms_min,
+      omIndex+3, data->inet.duration_ms_max, 
+      omIndex+4, data->inet.loss_total, 
+      omIndex+5, data->inet.loss_min, 
+      omIndex+6, data->inet.loss_max),
+    "&");
+  
+  // Send to queue
+  if (omValues) {
+    dsSend(EDS_OPENMON, CONFIG_OPENMON_PINGER_ID, omValues, false);
+    free(omValues);
   };
 }
 

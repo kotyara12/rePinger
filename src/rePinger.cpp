@@ -240,9 +240,11 @@ static void pingerFreeSession(pinger_data_t *ep)
 {
   if (ep) {
     if (ep->sock > 0) {
-      close(ep->sock);
+      lwip_close(ep->sock);
       ep->sock = 0;
     };
+    ep->host_resolved = 0;
+    ip_addr_set_zero(&ep->host_addr);
     if (ep->packet_hdr) {
       free(ep->packet_hdr);
       ep->packet_hdr = nullptr;
@@ -258,6 +260,8 @@ static esp_err_t pingerInitSession(pinger_data_t *ep, const char* hostname, uint
 
   // Set parameters for ping
   ep->host_name = hostname;
+  ep->host_resolved = 0;
+  ip_addr_set_zero(&ep->host_addr);
   ep->total_state = PING_OK;
   ep->limit_unavailable = limit_unavailable;
   ep->count_unavailable = 0;
@@ -291,7 +295,7 @@ static void pingerCloseSocket(pinger_data_t *ep)
 {
   if (ep) {
     if (ep->sock > 0) {
-      close(ep->sock);
+      lwip_close(ep->sock);
       ep->sock = 0;
     };
   }
@@ -312,21 +316,22 @@ static void pingerDnsFound(const char* hostname, const ip_addr_t *ipaddr, void *
 }
 #endif /* LWIP_DNS */ 
 
-static esp_err_t pingerOpenSocket(pinger_data_t *ep)
+// Resolve hostname to IP address
+static esp_err_t pingerResolveName(pinger_data_t *ep)
 {
   esp_err_t ret = ESP_OK;
-  PING_CHECK(ep, "Ping data can't be null", err, ESP_ERR_INVALID_ARG);
 
-  // Resolve hostname to IP address
   ep->host_resolved = 0;
   ip_addr_set_zero(&ep->host_addr);
+
   #if LWIP_DNS
     ret = dns_gethostbyname(ep->host_name, &ep->host_addr, pingerDnsFound, ep);
   #else
     ret = ipaddr_aton(ep->host_name, &ep->host_addr) ? ERR_OK : ERR_ARG;
   #endif // LWIP_DNS
+  
   if (ret == ERR_INPROGRESS) {
-    uint16_t waitTicks = pdMS_TO_TICKS(5000);
+    uint16_t waitTicks = pdMS_TO_TICKS(10000);
     while ((waitTicks > 0) && (ep->host_resolved == 0)) {
       vTaskDelay(1);
       waitTicks--;
@@ -338,6 +343,7 @@ static esp_err_t pingerOpenSocket(pinger_data_t *ep)
       ret = ESP_OK;
     };
   };
+
   if (ret == ESP_OK) {
     #if CONFIG_LWIP_IPV6
       // todo: IPV6 log support
@@ -361,16 +367,30 @@ static esp_err_t pingerOpenSocket(pinger_data_t *ep)
     rlog_e(logTAG, "Failed to resolve a hostname [ %s ]: %d %s", ep->host_name, ret, esp_err_to_name(ret));
     return ESP_ERR_NOT_FOUND;
   };
+  
+  return ret;
+}
+
+static esp_err_t pingerOpenSocket(pinger_data_t *ep)
+{
+  esp_err_t ret = ESP_OK;
+  PING_CHECK(ep, "Ping data can't be null", err, ESP_ERR_INVALID_ARG);
+
+  // Resolve hostname to IP address, if needed
+  if (ep->host_resolved == 0) {
+    ret = pingerResolveName(ep);
+    if (ret != ESP_OK) return ret;
+  };
 
   // Create socket
   #if CONFIG_LWIP_IPV6
     if (IP_IS_V4(&ep->host_addr) || ip6_addr_isipv4mappedipv6(ip_2_ip6(&ep->host_addr))) {
-      ep->sock = socket(AF_INET, SOCK_RAW, IP_PROTO_ICMP);
+      ep->sock = lwip_socket(AF_INET, SOCK_RAW, IP_PROTO_ICMP);
     } else {
-      ep->sock = socket(AF_INET6, SOCK_RAW, IP6_NEXTH_ICMP6);
+      ep->sock = lwip_socket(AF_INET6, SOCK_RAW, IP6_NEXTH_ICMP6);
     };
   #else
-    ep->sock = socket(AF_INET, SOCK_RAW, IP_PROTO_ICMP);
+    ep->sock = lwip_socket(AF_INET, SOCK_RAW, IP_PROTO_ICMP);
   #endif // CONFIG_LWIP_IPV6
 
   PING_CHECK(ep->sock > 0, "Create socket failed: %d", err, ESP_FAIL, ep->sock);
@@ -425,14 +445,16 @@ static ping_state_t pingerCheckHostEx(pinger_data_t *ep)
   rlog_d(logTAG, "Ping host [ %s ]...", ep->host_name);
   #endif // CONFIG_PING_SHOW_INTERMEDIATE
 
-  // Check the validity period of the IP address
-  if ((ep->sock > 0) && ((ep->received == 0) || ((xTaskGetTickCount() - ep->host_resolved) > pdMS_TO_TICKS(CONFIG_PINGER_IP_VALIDITY)))) {
+  // Resolve hostname to IP address
+  if ( (ep->received == 0) 
+    || (ep->host_resolved == 0) 
+    || ((xTaskGetTickCount() - ep->host_resolved) > pdMS_TO_TICKS(CONFIG_PINGER_IP_VALIDITY)) ) {
     pingerCloseSocket(ep);
-    memset(&ep->host_addr, 0, sizeof(ip_addr_t));
-    ep->host_resolved = 0; 
+    esp_err_t err = pingerResolveName(ep);
+    if (err != ESP_OK) goto err;
   };
 
-  // Opening a socket
+  // Opening socket
   if (ep->sock <= 0) {
     if (pingerOpenSocket(ep) != ESP_OK) goto err;
     if (ep->sock <= 0) goto err;
@@ -484,6 +506,11 @@ static ping_state_t pingerCheckHostEx(pinger_data_t *ep)
       ep->total_state = PING_OK;
     };
   } else goto err;
+
+  // Close socket
+  #if CONFIG_PING_KEEP_SOCKET == 0
+  pingerCloseSocket(ep);
+  #endif // CONFIG_PING_KEEP_SOCKET
 
   // Returning the batch result
   return ep->total_state;
