@@ -181,11 +181,14 @@ void pingerMqttPublishInetPlain(ping_inet_data_t* data)
       CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, true, true);
   #endif // CONFIG_SENSOR_STRING_ENABLE
 
+` char buffer[CONFIG_BUFFER_LEN_INT64_RADIX10];
+  _ui64toa(data->time_unavailable, buffer, 10);
   mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/unavailable/time/unix"), 
-    malloc_stringf("%d", data->time_unavailable), 
+    malloc_string(buffer), 
     CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, true, true);
+  time2str(CONFIG_FORMAT_DTS, &(data->time_unavailable), buffer, sizeof(buffer));
   mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/unavailable/time/string"), 
-    malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable), 
+    malloc_string(buffer), 
     CONFIG_MQTT_PINGER_QOS, CONFIG_MQTT_PINGER_RETAINED, true, true);
 
   mqttPublish(mqttGetSubTopic(_mqttTopicPing, "internet/unavailable/count"), 
@@ -236,13 +239,13 @@ char* pingerMqttPublishHostJson(ping_host_data_t* data)
   #endif // CONFIG_SENSOR_STRING_ENABLE
 
   char* json_unavailable = nullptr;
-    if (data->state >= PING_UNAVAILABLE) {
-    char* s_unavailable = malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable);
-    if (s_unavailable) {
-      json_unavailable = malloc_stringf("\"unavailable\":{\"time\":{\"unix\":%d,\"string\":\"%s\"}}", 
-        data->time_unavailable, s_unavailable);
-      free(s_unavailable);
-    };
+  if (data->state >= PING_UNAVAILABLE) {
+    char t_unavailable[CONFIG_BUFFER_LEN_INT64_RADIX10];
+    char s_unavailable[CONFIG_FORMAT_STRFTIME_DTS_BUFFER_SIZE];
+    _ui64toa(data->time_unavailable, t_unavailable, 10);
+    time2str(CONFIG_FORMAT_DTS, &(data->time_unavailable), s_unavailable, sizeof(CONFIG_FORMAT_STRFTIME_BUFFER_SIZE));
+    json_unavailable = malloc_stringf("\"unavailable\":{\"time\":{\"unix\":%s,\"string\":\"%s\"}}", 
+      t_unavailable, s_unavailable);
   };
   
   if ((json_packets) && (json_duration) && (json_loss)) {
@@ -321,12 +324,12 @@ char* pingerMqttPublishInetJson(ping_inet_data_t* data)
   // Timestamps and summary
   char* json_unavailable = nullptr;
   if (data->state >= PING_UNAVAILABLE) {
-    char* s_unavailable = malloc_timestr(CONFIG_FORMAT_DTS, data->time_unavailable);
-    if (s_unavailable) {
-      json_unavailable = malloc_stringf("\"unavailable\":{\"time\":{\"unix\":%d,\"string\":\"%s\"},\"count\":%d}", 
-        data->time_unavailable, s_unavailable, data->count_unavailable);
-      free(s_unavailable);
-    };
+    char t_unavailable[CONFIG_BUFFER_LEN_INT64_RADIX10];
+    char s_unavailable[CONFIG_FORMAT_STRFTIME_DTS_BUFFER_SIZE];
+    _ui64toa(data->time_unavailable, t_unavailable, 10);
+    time2str(CONFIG_FORMAT_DTS, &(data->time_unavailable), s_unavailable, sizeof(CONFIG_FORMAT_STRFTIME_BUFFER_SIZE));
+    json_unavailable = malloc_stringf("\"unavailable\":{\"time\":{\"unix\":%s,\"string\":\"%s\"},\"count\":%d}", 
+      t_unavailable, s_unavailable, data->count_unavailable);
   };
 
   #ifdef CONFIG_FORMAT_PING_MIXED

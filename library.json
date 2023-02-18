@@ -1,6 +1,6 @@
 {
   "name": "rePinger",
-  "version": "2.4.0",
+  "version": "2.4.2",
   "description": "Service for periodically checking the availability of the Internet on one or several public servers",
   "keywords": "ping",
   "authors":
