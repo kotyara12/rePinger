@@ -337,7 +337,7 @@ static esp_err_t pingerResolveName(pinger_data_t *ep)
       waitTicks--;
     };
     if (ep->host_resolved == 0) {
-      rlog_e(logTAG, "Failed to resolve a hostname [ %s ]: DNS TIMEOUT");
+      rlog_e(logTAG, "Failed to resolve a hostname [ %s ]: DNS TIMEOUT", ep->host_name);
       return ESP_ERR_NOT_FOUND;
     } else {
       ret = ESP_OK;
