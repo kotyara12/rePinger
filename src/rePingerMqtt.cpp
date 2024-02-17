@@ -9,7 +9,7 @@
 #include "reMqtt.h"
 #include "reStates.h"
 
-#if CONFIG_MQTT_PINGER_ENABLE
+#if CONFIG_PINGER_ENABLE && CONFIG_MQTT_PINGER_ENABLE
 
 static const char *logTAG = "PING";
 static char* _mqttTopicPing = nullptr;
