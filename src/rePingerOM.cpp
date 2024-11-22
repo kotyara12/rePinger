@@ -34,16 +34,29 @@ void pingerOpenMonPublish(ping_publish_data_t* data)
   // Append free HEAP
   #if CONFIG_OPENMON_PINGER_HEAP_FREE
     {
-      double heap_total = (double)heap_caps_get_total_size(MALLOC_CAP_DEFAULT) / 1024.0;
-      double heap_free = (double)heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0;
+      double heap_int_total = (double)heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024.0;
+      double heap_int_free = (double)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024.0;
       omValues = concat_strings_div(omValues, 
         malloc_stringf("p%d=%f&p%d=%f", 
-          omIndex, heap_free, 
-          omIndex+1, 100.0*heap_free/heap_total),
+          omIndex, heap_int_free, 
+          omIndex+1, 100.0*heap_int_free/heap_int_total),
         "&");
       omIndex = omIndex+2;
     }
   #endif // CONFIG_OPENMON_PINGER_HEAP_FREE
+  
+  #if CONFIG_OPENMON_PINGER_HEAP_SPI_FREE
+    {
+      double heap_spi_total = (double)heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024.0;
+      double heap_spi_free = (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024.0;
+      omValues = concat_strings_div(omValues, 
+        malloc_stringf("p%d=%f&p%d=%f", 
+          omIndex, heap_spi_free, 
+          omIndex+1, 100.0*heap_spi_free/heap_spi_total),
+        "&");
+      omIndex = omIndex+2;
+    }
+  #endif // CONFIG_OPENMON_PINGER_HEAP_SPI_FREE
 
   // Append hosts
   #if CONFIG_OPENMON_PINGER_HOSTS
